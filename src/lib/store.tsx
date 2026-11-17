@@ -7,6 +7,7 @@ export type Dialog =
   | { kind: 'buy'; specimen: Specimen }
   | { kind: 'buy-listing'; listing: Listing }
   | { kind: 'pack'; series: Series }
+  | { kind: 'opening'; series: Series; currency: 'USDC' | 'SOL'; seed: string }
   | { kind: 'reveal'; reveal: PackReveal; payment?: TxResult; mint?: string; via: 'pack' | 'market' | 'holding' }
   | { kind: 'item'; holding: Holding }
   | { kind: 'list'; holding: Holding }

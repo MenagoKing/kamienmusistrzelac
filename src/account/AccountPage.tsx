@@ -1,6 +1,6 @@
 // /account: the collector's own space. Profile with level and rank, the collection (sell, sell back,
 // redeem, share), listings, achievements, activity, shipments and settings.
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { Holding, PageData, RockType } from '../data';
 import { api } from '../lib/api';
 import { AppProvider, callsign, useApp } from '../lib/store';
@@ -13,6 +13,7 @@ import { Footer } from '../components/Closing';
 import { Spinner, Toasts } from '../components/Overlay';
 import { DialogHost } from '../components/Dialogs';
 import { AvatarTurn, ROCK_LABEL } from '../components/Avatar';
+import { RockView } from '../components/RockView';
 
 type Tab = 'collection' | 'selling' | 'achievements' | 'activity' | 'shipments' | 'settings';
 const TABS: [Tab, string][] = [['collection', 'Collection'], ['selling', 'For sale'], ['achievements', 'Achievements'], ['activity', 'Activity'], ['shipments', 'Shipments'], ['settings', 'Settings']];
@@ -66,10 +67,10 @@ function Banner() {
 
 function Card({ h, i }: { h: Holding; i: number }) {
   const { open } = useApp();
-  const img = useStill(h.render, { w: 360, h: 270, rot: -2 + (i % 7) * .2, scale: 1.3 }, h.photo);
+  const ref = useRef<HTMLButtonElement>(null);
   return (
-    <button type="button" className={'ccard ' + h.render.type} onClick={() => open({ kind: 'item', holding: h })}>
-      <span className="ccard-ph"><img src={img} alt="" />
+    <button ref={ref} type="button" className={'ccard ' + h.render.type} onClick={() => open({ kind: 'item', holding: h })}>
+      <span className="ccard-ph"><RockView hint={h.render} mode="hover" startRot={-2 + (i % 7) * .2} hoverRef={ref as React.RefObject<HTMLElement>} label={`${h.name} in 3D`} />
         {h.band && <em className={'cb ' + h.band}>{BAND_NAME[h.band]}</em>}
         {h.listing && <em className="cb sale">For sale · {usd(h.listing.price_usd)}</em>}
         {h.status.kind === 'redeeming' && <em className="cb ship">Shipping</em>}
@@ -133,7 +134,7 @@ function BookRock({ type, locked }: { type: RockType; locked: boolean }) {
 /* ---------- for sale ---------- */
 
 function Selling() {
-  const { me, refresh, toast, open } = useApp();
+  const { me, data, refresh, toast, open } = useApp();
   const [busy, setBusy] = useState('');
   if (!me) return null;
   const cancel = async (id: string) => {
@@ -144,13 +145,19 @@ function Selling() {
   return (
     <>
       {me.listings.length ? (
-        <ul className="slist">{me.listings.map(l => (
-          <li key={l.id}>
-            <span><b>{l.specimen.name}</b><small className="mono dim">{l.specimen.id} · listed {new Date(l.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</small></span>
-            <strong>{usd(l.price_usd)}</strong>
-            <button type="button" className="btn line sm" disabled={busy === l.id} onClick={() => cancel(l.id)}>{busy === l.id ? <Spinner label="Working" /> : 'Take off sale'}</button>
-          </li>
-        ))}</ul>
+        <div className="cgrid">{me.listings.map(l => (
+          <div key={l.id} className={'ccard sale ' + l.specimen.render.type}>
+            <span className="ccard-ph"><RockView hint={l.specimen.render} mode="hover" label={`${l.specimen.name} in 3D`} /><em className="cb sale">On sale</em></span>
+            <span className="ccard-bd">
+              <span className="mono dim">{l.specimen.id} · listed {new Date(l.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}</span>
+              <b>{l.specimen.name}</b>
+              <span className="mono dim">{l.specimen.class} · {mass(l.specimen.mass_g)}</span>
+              <span className="ccard-v"><span className="mono dim">Your price</span><strong className="hotv">{usd(l.price_usd)}</strong></span>
+              <span className="ccard-v small"><span className="mono dim">You receive</span><span className="mono">{usd(l.price_usd * (1 - data.rules.royalty))}</span></span>
+              <button type="button" className="btn line sm" disabled={busy === l.id} onClick={() => cancel(l.id)}>{busy === l.id ? <Spinner label="Working" /> : 'Take off sale'}</button>
+            </span>
+          </div>
+        ))}</div>
       ) : <p className="cempty-p">Nothing on sale. Set a price on any specimen you hold and it shows on the market under “From collectors”.</p>}
       {listable.length > 0 && (
         <>

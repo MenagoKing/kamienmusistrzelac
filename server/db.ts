@@ -79,6 +79,12 @@ CREATE TABLE IF NOT EXISTS listings (
 );
 CREATE INDEX IF NOT EXISTS listings_status ON listings(status);
 CREATE INDEX IF NOT EXISTS listings_specimen ON listings(specimen_id);
+CREATE TABLE IF NOT EXISTS nft_jobs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, specimen_id TEXT NOT NULL, action TEXT NOT NULL, owner TEXT, asset TEXT,
+  status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, signature TEXT, error TEXT,
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS nft_jobs_status ON nft_jobs(status);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '',
   detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
@@ -99,6 +105,17 @@ function open() {
 /** One connection per process (survives Vite's module reloads in dev). */
 export const db: DatabaseSync = g.__srdb ?? (g.__srdb = open());
 db.exec(SCHEMA); // idempotent: picks up new tables when Vite reloads this module in dev
+
+/** Adds columns introduced after a database was created. */
+function addColumn(table: string, col: string, def: string) {
+  const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name);
+  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+}
+addColumn('specimens', 'mint_status', "TEXT NOT NULL DEFAULT 'none'");
+addColumn('specimens', 'mint_tx', 'TEXT');
+addColumn('specimens', 'nft_owner', 'TEXT');
+addColumn('users', 'google_sub', 'TEXT');
+addColumn('series', 'ends_at', 'TEXT');
 
 export const all = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).all(...p) as T[];
 export const get = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).get(...p) as T | undefined;

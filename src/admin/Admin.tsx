@@ -9,6 +9,7 @@ import { DropPage, DropsList } from './pages/Drops';
 import { Redemptions } from './pages/Redemptions';
 import { Listings, Orders, Wallets, Waitlist, AuditLog } from './pages/Records';
 import { Settings } from './pages/Settings';
+import { Chain } from './pages/Chain';
 
 const NAV: { id: string; label: string; icon: ReactNode; group?: string }[] = [
   { id: 'overview', label: 'Overview', icon: <path d="M3 13h7V3H3zM14 21h7V11h-7zM3 21h7v-5H3zM14 7h7V3h-7z" /> },
@@ -21,6 +22,7 @@ const NAV: { id: string; label: string; icon: ReactNode; group?: string }[] = [
   { id: 'wallets', label: 'Collectors', icon: <><circle cx="9" cy="8" r="4" /><path d="M2 21c0-4 3-6 7-6s7 2 7 6M17 4a4 4 0 010 8M19 15c2 1 3 3 3 6" /></> },
   { id: 'waitlist', label: 'Waitlist', icon: <path d="M4 5h16v14H4zM4 6l8 7 8-7" /> },
   { id: 'settings', label: 'Rules & settings', group: 'System', icon: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></> },
+  { id: 'chain', label: 'Solana NFTs', icon: <path d="M5 7h12l2-3H7zM5 13.5h12l2-3H7zM5 20h12l2-3H7z" /> },
   { id: 'audit', label: 'Audit log', icon: <path d="M12 8v4l3 2M3 12a9 9 0 109-9 9 9 0 00-7 3.3M3 4v4h4" /> },
 ];
 
@@ -80,6 +82,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     case 'waitlist': page = <Waitlist />; break;
     case 'settings': page = <Settings />; break;
     case 'audit': page = <AuditLog />; break;
+    case 'chain': page = <Chain />; break;
     default: page = <Overview />;
   }
 

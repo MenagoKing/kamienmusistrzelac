@@ -97,10 +97,22 @@ function Editor({ initial, rules, onClose, onSaved }: { initial: SpecRow | null;
     const r = await run(() => api<SpecRow>('POST', `/api/admin/specimens/${cur!.id}/${path}`, body), msg);
     if (r) { setCur(r); setS(r); onSaved(); }
   };
-  const upload = async (f: File) => {
-    const data = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(f); });
-    const r = await run(() => api<{ url: string }>('POST', '/api/admin/upload', { data }), 'Photo uploaded');
-    if (r) setFile('photos', [...(s.file?.photos ?? []), r.url]);
+  /** Photos save straight away on an existing specimen, so they show on the listing at once. */
+  const setPhotos = async (photos: string[], msg: string) => {
+    const next = { ...s, file: { ...(s.file ?? {}), photos } };
+    setS(next);
+    if (!cur) return;
+    const r = await run(() => api<SpecRow>('PUT', '/api/admin/specimens/' + cur.id, { ...next, fall: next.fall ?? null }), msg);
+    if (r) { setCur(r); setS(r); onSaved(); }
+  };
+  const upload = async (files: FileList | File[]) => {
+    const urls: string[] = [];
+    for (const f of Array.from(files).filter(f => f.type.startsWith('image/'))) {
+      const data = await new Promise<string>((res, rej) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result)); fr.onerror = rej; fr.readAsDataURL(f); });
+      const r = await run(() => api<{ url: string }>('POST', '/api/admin/upload', { data }));
+      if (r) urls.push(r.url);
+    }
+    if (urls.length) await setPhotos([...(s.file?.photos ?? []), ...urls], urls.length === 1 ? 'Photo added to the listing' : urls.length + ' photos added to the listing');
   };
 
   const file = s.file ?? {};
@@ -141,21 +153,15 @@ function Editor({ initial, rules, onClose, onSaved }: { initial: SpecRow | null;
         </div>
       </div>
 
+      <h3 className="ed-h">Listing photos <span className="mono dim">{(file.photos ?? []).length} · shown on the market next to the 3D model</span></h3>
+      <PhotoManager photos={file.photos ?? []} busy={busy} onUpload={upload} onChange={setPhotos} />
+
       <h3 className="ed-h">Specimen file <span className={'fileq' + (done === FILE_ITEMS.length ? ' ok' : '')}>{done}/{FILE_ITEMS.length}</span></h3>
       <div className="filelist">
         {FILE_ITEMS.map(f => f.key === 'photos' ? (
           <div key={f.key} className={'fi' + ((file.photos ?? []).length ? ' y' : '')}>
             <span className="mono">{f.label}</span>
-            <div className="photos">
-              {(file.photos ?? []).map((p, i) => (
-                <span key={i} className="ph">
-                  {/^(\/uploads\/|https?:\/\/).*\.(png|jpe?g|webp|avif|gif)$/i.test(p) ? <img src={p} alt="" /> : <code>{p}</code>}
-                  <button onClick={() => setFile('photos', (file.photos ?? []).filter((_, j) => j !== i))} aria-label="Remove">×</button>
-                </span>
-              ))}
-              <label className="ab ghost sm up">Upload photo<input type="file" accept="image/*" hidden onChange={e => { const f0 = e.target.files?.[0]; if (f0) upload(f0); e.target.value = ''; }} /></label>
-              <button className="ab ghost sm" onClick={() => { const u = prompt('Link to a photo or 360° video'); if (u) setFile('photos', [...(file.photos ?? []), u]); }}>Add link</button>
-            </div>
+            <span className="dim small">{(file.photos ?? []).length ? `${(file.photos ?? []).length} on file · managed under Listing photos above` : 'Add them under Listing photos above'}</span>
           </div>
         ) : (
           <label key={f.key} className={'fi' + ((file[f.key] as string)?.trim() ? ' y' : '')}>
@@ -184,4 +190,37 @@ function Editor({ initial, rules, onClose, onSaved }: { initial: SpecRow | null;
 function PreviewStill({ category, seed, photo }: { category: RockType; seed: number; photo: string | null }) {
   const url = useStill({ type: category, seed }, { w: 320, h: 260, rot: -1.4, scale: 1.4 }, photo);
   return <div className="prev">{url ? <img src={url} alt="Preview" /> : <span className="a-spin" />}</div>;
+}
+
+const isImg = (p: string) => /^(\/uploads\/|https?:\/\/).*\.(png|jpe?g|webp|avif|gif)(\?.*)?$/i.test(p);
+
+/** Drop or pick photos; the first image is the cover. Reorder, remove, or add a link. */
+function PhotoManager({ photos, busy, onUpload, onChange }: { photos: string[]; busy: boolean; onUpload: (f: FileList | File[]) => void; onChange: (p: string[], msg: string) => void }) {
+  const [over, setOver] = useState(false);
+  const move = (i: number, d: number) => { const p = [...photos]; const j = i + d; if (j < 0 || j >= p.length) return; [p[i], p[j]] = [p[j], p[i]]; onChange(p, 'Order saved'); };
+  return (
+    <div className={'pmgr' + (over ? ' over' : '')} onDragOver={e => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)} onDrop={e => { e.preventDefault(); setOver(false); if (e.dataTransfer.files.length) onUpload(e.dataTransfer.files); }}>
+      {photos.length > 0 && (
+        <div className="pgrid">
+          {photos.map((p, i) => (
+            <figure key={p + i} className={i === 0 ? 'cover' : ''}>
+              {isImg(p) ? <img src={p} alt="" /> : <code>{p}</code>}
+              {i === 0 && <span className="mono pcov">Cover</span>}
+              <div className="pacts">
+                <button type="button" onClick={() => move(i, -1)} disabled={i === 0} aria-label="Move left">←</button>
+                {i !== 0 && <button type="button" onClick={() => onChange([p, ...photos.filter((_, j) => j !== i)], 'Cover set')}>Cover</button>}
+                <button type="button" onClick={() => move(i, 1)} disabled={i === photos.length - 1} aria-label="Move right">→</button>
+                <button type="button" className="del" onClick={() => onChange(photos.filter((_, j) => j !== i), 'Photo removed')} aria-label="Remove">×</button>
+              </div>
+            </figure>
+          ))}
+        </div>
+      )}
+      <div className="pdrop">
+        <span>{busy ? 'Uploading…' : 'Drop photos here (PNG, JPEG, WebP, up to 8 MB each)'}</span>
+        <label className="ab primary sm up">Choose photos<input type="file" accept="image/*" multiple hidden onChange={e => { if (e.target.files?.length) onUpload(e.target.files); e.target.value = ''; }} /></label>
+        <button type="button" className="ab ghost sm" onClick={() => { const u = prompt('Link to a photo (https://…/image.jpg) or a 360° video'); if (u) onChange([...photos, u.trim()], 'Link added'); }}>Add a link</button>
+      </div>
+    </div>
+  );
 }

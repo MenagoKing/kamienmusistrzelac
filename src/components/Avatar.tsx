@@ -1,7 +1,7 @@
 // Collector avatar: a procedural meteorite picked by the avatar seed, shown as a turntable of stills.
-import { useEffect, useState } from 'react';
 import type { RenderHint, RockType } from '../data';
-import { still, useStill } from '../lib/stills';
+import { useStill } from '../lib/stills';
+import { RockView } from './RockView';
 
 const TYPES: RockType[] = ['stone', 'iron', 'pallasite', 'lunar', 'martian'];
 
@@ -13,38 +13,12 @@ export function AvatarStill({ seed, size = 34 }: { seed: number; size?: number }
   return <span className="av" style={{ width: size, height: size }} aria-hidden="true">{url && <img src={url} alt="" />}</span>;
 }
 
-const FRAMES = 18;
-
-/** Slowly turning avatar (sign-in screen, profile). Frames render lazily; the first shows at once. */
+/** Smoothly turning 3D avatar you can drag (sign-in screen, profile). */
 export function AvatarTurn({ seed, size = 260 }: { seed: number; size?: number }) {
-  const rock = avatarRock(seed);
-  const [frames, setFrames] = useState<string[]>([]);
-  const [i, setI] = useState(0);
-  useEffect(() => {
-    let alive = true;
-    setFrames([]);
-    (async () => {
-      const out: string[] = [];
-      for (let k = 0; k < FRAMES; k++) {
-        const u = await still(rock, { w: 320, h: 320, rot: -2.2 + (k / FRAMES) * Math.PI * 2, scale: 1.5 });
-        if (!alive) return;
-        out.push(u);
-        setFrames([...out]);
-      }
-    })();
-    return () => { alive = false; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seed]);
-  useEffect(() => {
-    if (frames.length < FRAMES || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-    const t = setInterval(() => setI(x => (x + 1) % FRAMES), 140);
-    return () => clearInterval(t);
-  }, [frames.length]);
-  const src = frames[frames.length < FRAMES ? 0 : i];
   return (
-    <div className="avturn" style={{ width: size, height: size }} aria-hidden="true">
-      <i className="halo" />
-      {src ? <img src={src} alt="" /> : <span className="spin" />}
+    <div className="avturn" style={{ width: size, height: size }}>
+      <i className="halo" aria-hidden="true" />
+      <RockView key={seed} hint={avatarRock(seed)} mode="live" auto={0.55} scale={1.5} label="Your collector rock in 3D. Drag to turn it." className="av3d" />
     </div>
   );
 }

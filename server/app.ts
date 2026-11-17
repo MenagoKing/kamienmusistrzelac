@@ -13,8 +13,13 @@ import { ensureSeeded, reseed } from './seed.ts';
 import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile } from './accounts.ts';
 import { adminListings, buyListing, cancelListing, listForSale, listingsOf } from './market.ts';
 import { publicListings } from './store.ts';
+import { chainAirdrop, chainStatus, drain, migrateSimulatedMints, nftOwnerOf, queueTransfer, retryFailed, startWorker } from './nft.ts';
+import { googleLogin } from './google.ts';
+import { nftJson, nftSvg } from './nftmeta.ts';
 
 ensureSeeded();
+migrateSimulatedMints();
+startWorker();
 
 type Ctx = { req: IncomingMessage; res: ServerResponse; params: string[]; query: URLSearchParams; body: any };
 type Handler = (c: Ctx) => unknown;
@@ -66,6 +71,18 @@ on('POST', '/api/specimens/:id/redeem', ({ req, params, body }) => redeem(requir
 
 on('POST', '/api/auth/register', ({ req, res, body }) => register(req, res, body));
 on('POST', '/api/auth/login', ({ req, res, body }) => login(req, res, body));
+on('POST', '/api/auth/google', ({ req, res, body }) => googleLogin(req, res, body));
+on('GET', '/api/nft/:id', ({ req, params }) => nftJson(req, params[0]));
+on('POST', '/api/specimens/:id/withdraw', ({ req, params }) => {
+  const me = requireWallet(req);
+  const s = specimenRow(params[0]) ?? fail(404, 'Specimen not found');
+  if (s.owner !== me || s.state !== 'held') fail(403, 'You do not hold this specimen');
+  const to = nftOwnerOf(me);
+  if (to === me) fail(400, 'Link a Solana wallet in Settings first');
+  if (s.nft_owner === to) fail(409, 'It is already in your wallet');
+  queueTransfer(s.id, to);
+  return { ok: true, to };
+});
 on('PUT', '/api/me/profile', ({ req, body }) => updateProfile(requireWallet(req), body));
 on('PUT', '/api/me/password', ({ req, body }) => changePassword(requireWallet(req), body));
 on('POST', '/api/me/link-wallet', ({ req, body }) => linkWallet(requireWallet(req), body));
@@ -126,6 +143,10 @@ admin('POST', '/drops/:id/events', ({ params, body }, a) => A.dropEvent(a, param
 admin('GET', '/redemptions', ({ query }) => A.listRedemptions(query.get('status')));
 admin('PUT', '/redemptions/:id', ({ params, body }, a) => A.updateRedemption(a, params[0], body));
 admin('GET', '/wallets', () => A.listWallets());
+admin('GET', '/chain', () => chainStatus());
+admin('POST', '/chain/airdrop', async () => ({ balance: await chainAirdrop() }));
+admin('POST', '/chain/retry', () => retryFailed());
+admin('POST', '/chain/process', async () => { await drain(); return chainStatus(); });
 admin('GET', '/listings', ({ query }) => adminListings(query.get('status')));
 admin('POST', '/listings/:id/cancel', ({ params }, a) => { const r = cancelListing(null, params[0], true); audit(a, 'listing.cancel', params[0]); return r; });
 admin('GET', '/wallets/:address', ({ params }) => A.walletDetail(params[0]));
@@ -185,6 +206,10 @@ function serveUpload(res: ServerResponse, pathname: string) {
 export async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', 'http://local');
   if (url.pathname.startsWith('/uploads/')) { serveUpload(res, url.pathname); return true; }
+  if (/^\/api\/nft\/[\w-]+\.svg$/.test(url.pathname)) {
+    try { const svg = nftSvg(url.pathname.split('/').pop()!); res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' }); res.end(svg); } catch { res.writeHead(404); res.end(); }
+    return true;
+  }
   if (!url.pathname.startsWith('/api/')) return false;
   const method = req.method ?? 'GET';
   try {

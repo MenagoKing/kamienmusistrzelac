@@ -1,6 +1,6 @@
 import type { Dialog } from '../lib/store';
 import { AuthDialog } from './WalletDialog';
-import { BuyDialog, BuyListingDialog, PackDialog, RevealDialog } from './Checkout';
+import { BuyDialog, BuyListingDialog, PackDialog, PackOpening, RevealDialog } from './Checkout';
 import { ItemDialog, ListDialog, RedeemDialog, ShareDialog } from './Account';
 import { ProofDialog, RegisterDialog } from './Explore';
 
@@ -12,6 +12,7 @@ export function DialogHost({ d }: { d: Dialog | null }) {
     case 'buy': return <BuyDialog specimen={d.specimen} />;
     case 'buy-listing': return <BuyListingDialog listing={d.listing} />;
     case 'pack': return <PackDialog series={d.series} />;
+    case 'opening': return <PackOpening key={d.seed} series={d.series} currency={d.currency} seed={d.seed} />;
     case 'reveal': return <RevealDialog key={d.reveal.specimen.id} reveal={d.reveal} payment={d.payment} mint={d.mint} via={d.via} />;
     case 'item': return <ItemDialog holding={d.holding} />;
     case 'list': return <ListDialog holding={d.holding} />;

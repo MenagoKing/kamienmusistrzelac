@@ -17,6 +17,7 @@ export function getRules(): Rules {
     ...saved,
     bands: { ...DEFAULT_RULES.bands, ...(saved.bands ?? {}) },
     edge_split: { ...DEFAULT_RULES.edge_split, ...(saved.edge_split ?? {}) },
+    google_client_id: saved.google_client_id || process.env.GOOGLE_CLIENT_ID || '',
   };
 }
 
@@ -30,7 +31,7 @@ export interface SpecimenRow {
   id: string; name: string; class: string; category: RockType; mass_g: number; origin: string | null; fall: string | null;
   vault_value_usd: number | null; state: SpecimenState; series_id: string | null; drop_id: string | null; sold_back: number;
   owner: string | null; mint: string | null; vault_id: string | null; file: string; notes: string; render_seed: number;
-  featured: number; acquired_via: string | null; acquired_at: string | null; paid_usd: number | null; created_at: string; updated_at: string;
+  featured: number; mint_status: string; mint_tx: string | null; nft_owner: string | null; acquired_via: string | null; acquired_at: string | null; paid_usd: number | null; created_at: string; updated_at: string;
 }
 
 export const parseFall = (f: string | null): number | 'find' | null => (f == null || f === '' ? null : f === 'find' ? 'find' : Number(f));
@@ -41,9 +42,10 @@ export function fileOf(r: Pick<SpecimenRow, 'file'>): SpecimenFile {
   try { return JSON.parse(r.file) as SpecimenFile; } catch { return {}; }
 }
 
-export function fileComplete(r: Pick<SpecimenRow, 'file' | 'origin' | 'vault_value_usd'>) {
+/** Dev note: name + classification, weigh video, photos, COA, provenance + export, origin, invoice, vault ID. */
+export function fileComplete(r: Pick<SpecimenRow, 'file' | 'origin' | 'vault_value_usd' | 'vault_id'>) {
   const f = fileOf(r);
-  return FILE_ITEMS.every(i => present(f[i.key])) && !!r.origin && r.vault_value_usd != null && r.vault_value_usd > 0;
+  return FILE_ITEMS.every(i => present(f[i.key])) && !!r.origin && !!r.vault_id && r.vault_value_usd != null && r.vault_value_usd > 0;
 }
 
 const isImage = (u: string) => /^(\/uploads\/|https?:\/\/)/.test(u) && /\.(png|jpe?g|webp|avif|gif)(\?.*)?$/i.test(u);
@@ -80,7 +82,7 @@ export function toPublic(r: SpecimenRow): Specimen {
     id: r.id, name: r.name, class: r.class, mass_g: r.mass_g, origin: r.origin, fall: parseFall(r.fall),
     vault_value_usd: r.vault_value_usd, status: statusOf(r),
     file_done: [...FILE_ITEMS.map(i => present(f[i.key])), !!r.mint],
-    photo: photoOf(r), mint: r.mint, owner: displayName(r.owner),
+    photo: photoOf(r), photos: (fileOf(r).photos ?? []).filter(isImage), mint: r.mint, mint_status: r.mint_status, nft_owner: r.nft_owner, owner: displayName(r.owner),
     listing: l ? { id: l.id, price_usd: l.price_usd } : null,
     render: { type: r.category, seed: r.render_seed },
   };
@@ -225,7 +227,7 @@ export function publicListings(viewer?: string | null): Listing[] {
 
 export function pageData(): PageData {
   const rules = getRules();
-  const market = all<SpecimenRow>("SELECT * FROM specimens WHERE state = 'market' ORDER BY featured DESC, vault_value_usd DESC LIMIT 12").map(toPublic);
+  const market = all<SpecimenRow>("SELECT * FROM specimens WHERE state = 'market' ORDER BY featured DESC, vault_value_usd DESC LIMIT 120").map(toPublic);
   const featured = all<SpecimenRow>('SELECT * FROM specimens WHERE featured > 0 ORDER BY featured');
   const extra = featured.length >= 7 ? [] : all<SpecimenRow>("SELECT * FROM specimens WHERE featured = 0 ORDER BY updated_at DESC LIMIT ?", 7 - featured.length);
   const register = [...featured, ...extra].map(toPublic);
@@ -241,7 +243,7 @@ export function pageData(): PageData {
     redeemed: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE state = 'redeemed'")!.n,
   };
   const live = open.find(s => s.status === 'open') ?? open[0] ?? null;
-  return { listings: publicListings(), rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
+  return { chain: { cluster: process.env.CHAIN === 'simulated' ? 'simulated' : process.env.SOLANA_CLUSTER || 'devnet' }, listings: publicListings(), rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
 }
 
 export function vaultRegister(q = '', state = ''): Specimen[] {

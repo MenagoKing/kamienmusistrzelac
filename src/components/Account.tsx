@@ -2,11 +2,13 @@ import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../lib/api';
 import { redeemSpecimen, type Holding, type PackReveal } from '../data';
 import { useApp } from '../lib/store';
-import { still, useStill } from '../lib/stills';
+import { still } from '../lib/stills';
 import { buyback, marketPrice, mass, originLabel, pct, usd } from '../lib/format';
 import { BAND_NAME } from '../../shared/rules.ts';
 import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
+import { Media } from './Media';
+import { NftLine } from './Checkout';
 
 export const holdingReveal = (h: Holding): PackReveal => ({
   pull_id: null, series_id: null, band: h.band ?? 'par', pack_price_usd: h.paid_usd ?? h.vault_value_usd ?? 0, vault_value_usd: h.vault_value_usd ?? 0,
@@ -132,10 +134,14 @@ export function ShareDialog({ reveal }: { reveal: PackReveal }) {
 const VIA: Record<Holding['acquired_via'], string> = { market: 'Bought on the market', pack: 'Pulled from a pack', raffle: 'Won in a launch drop raffle', secondary: 'Bought from a collector' };
 
 export function ItemDialog({ holding: h }: { holding: Holding }) {
-  const { data, open, refresh, toast, close } = useApp();
-  const img = useStill(h.render, { w: 520, h: 346, rot: -1.25, scale: 1.35 }, h.photo);
+  const { data, me, open, refresh, toast, close } = useApp();
   const [busy, setBusy] = useState(false);
   const done = h.file_done ?? [];
+  const linked = me?.profile.linked_wallet;
+  const withdraw = async () => {
+    setBusy(true);
+    try { await api('POST', `/api/specimens/${h.id}/withdraw`, {}); await refresh(); toast('Sending the NFT to your wallet'); } catch (e: any) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
   const vault = h.vault_value_usd ?? 0;
   const shipping = h.status.kind === 'redeeming';
   const unlist = async () => {
@@ -146,7 +152,7 @@ export function ItemDialog({ holding: h }: { holding: Holding }) {
   return (
     <Overlay wide label={h.name} title={<div className="sec mono"><span>Your collection</span><span>{h.id}</span></div>}>
       <div className="co">
-        <div className="co-ph"><img src={img} alt={`${h.name}, ${h.class}`} />{h.band && <span className={'chip' + (h.band !== 'hit' ? ' ' + h.band : '')}>{BAND_NAME[h.band].toUpperCase()}</span>}</div>
+        <div className="co-media"><Media hint={h.render} photos={h.photos} label={h.name} className="co-ph" />{h.band && <span className={'chip' + (h.band !== 'hit' ? ' ' + h.band : '')}>{BAND_NAME[h.band].toUpperCase()}</span>}</div>
         <div className="co-bd">
           <h3>{h.name}</h3>
           <div className="cl mono">{h.class} · {mass(h.mass_g)} · {originLabel(h)}</div>
@@ -159,8 +165,9 @@ export function ItemDialog({ holding: h }: { holding: Holding }) {
           </dl>
           <ul className="chk cols">
             {FILE_ITEMS.map((f, i) => <li key={f.key} className={done[i] ? 'y' : ''}>{f.label}</li>)}
-            <li className={h.mint ? 'y' : ''}>NFT{h.mint ? ` ${h.mint.slice(0, 4)}…${h.mint.slice(-4)}` : ' burned for shipping'}</li>
           </ul>
+          <NftLine specimenId={h.id} />
+          {!shipping && linked && h.mint_status === 'minted' && h.nft_owner !== linked && <button type="button" className="lnk" disabled={busy} onClick={withdraw}>Send the NFT to my wallet {linked.slice(0, 4)}…{linked.slice(-4)}</button>}
           {shipping ? <p className="ok">On its way to you. Tracking is under Shipments.</p> : h.listing ? (
             <div className="acts">
               <button className="btn line" type="button" disabled={busy} onClick={unlist}>{busy ? <><Spinner label="Working" />Working…</> : 'Take off sale'}</button>

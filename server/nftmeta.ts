@@ -1,0 +1,45 @@
+// Off-chain NFT metadata (the asset's `uri`) and a generated card image, in the Metaplex JSON standard.
+// The specimen file is also on-chain as Attributes; this JSON adds the image and description.
+import type { IncomingMessage } from 'node:http';
+import { specimenRow, fileOf, photoOf } from './store.ts';
+import { fail } from './util.ts';
+
+const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
+const base = (req: IncomingMessage) => (process.env.PUBLIC_URL || `http://${req.headers.host ?? 'localhost'}`).replace(/\/$/, '');
+
+export function nftJson(req: IncomingMessage, id: string) {
+  const s = specimenRow(id.replace(/\.json$/, '')) ?? fail(404, 'Unknown specimen');
+  const f = fileOf(s);
+  const photo = photoOf(s);
+  const image = photo ? (photo.startsWith('http') ? photo : base(req) + photo) : `${base(req)}/api/nft/${s.id}.svg`;
+  return {
+    name: `${s.name} ${s.id}`,
+    symbol: 'ROCK',
+    description: `${s.name}, ${s.class}, ${s.mass_g} g. A real, certified meteorite specimen held in the Space Rocks vault (${s.vault_id ?? 'vault'}). Burn to redeem the physical rock.`,
+    image,
+    external_url: `${base(req)}/#vault`,
+    attributes: [
+      ['Specimen', s.id], ['Class', s.class], ['Category', s.category], ['Mass (g)', s.mass_g], ['Origin', s.origin ?? 'pending'],
+      ['Fall', s.fall ?? 'unknown'], ['Vault ID', s.vault_id ?? ''], ['Vault value (USD)', s.vault_value_usd ?? ''], ['Meteoritical Bulletin', f.bulletin ?? ''],
+      ['Certificate', f.coa ?? ''], ['Capsule tag', f.capsule_tag ?? ''],
+    ].filter(([, v]) => v !== '').map(([trait_type, value]) => ({ trait_type, value })),
+    properties: { category: 'image', files: [{ uri: image, type: photo ? 'image/jpeg' : 'image/svg+xml' }] },
+  };
+}
+
+const COLORS: Record<string, [string, string]> = { stone: ['#4a2412', '#B3A595'], iron: ['#2a2422', '#C9C2BA'], pallasite: ['#4a3a18', '#E8C27A'], lunar: ['#2c3340', '#A9B6C9'], martian: ['#5c2a12', '#F08A5D'] };
+
+export function nftSvg(id: string) {
+  const s = specimenRow(id.replace(/\.svg$/, '')) ?? fail(404, 'Unknown specimen');
+  const [bg, accent] = COLORS[s.category] ?? COLORS.stone;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="1000" viewBox="0 0 1000 1000">
+<defs><radialGradient id="g" cx="65%" cy="85%" r="80%"><stop offset="0" stop-color="${bg}"/><stop offset=".7" stop-color="#120d0b"/><stop offset="1" stop-color="#0E0A08"/></radialGradient>
+<radialGradient id="r" cx="40%" cy="35%" r="70%"><stop offset="0" stop-color="${accent}" stop-opacity=".9"/><stop offset=".55" stop-color="#3a2a22"/><stop offset="1" stop-color="#140e0b"/></radialGradient></defs>
+<rect width="1000" height="1000" fill="url(#g)"/>
+<path d="M600 300 L760 360 L800 520 L720 680 L540 720 L420 610 L430 420 Z" fill="url(#r)" stroke="${accent}" stroke-opacity=".35" stroke-width="3"/>
+<text x="70" y="120" fill="${accent}" font-family="monospace" font-size="30" letter-spacing="5">${esc(s.id)} · SPACE ROCKS</text>
+<text x="66" y="800" fill="#EFE6DA" font-family="Georgia, serif" font-size="96">${esc(s.name)}</text>
+<text x="70" y="860" fill="#A39484" font-family="monospace" font-size="30" letter-spacing="3">${esc(s.class.toUpperCase())} · ${s.mass_g} G</text>
+<text x="70" y="920" fill="#A39484" font-family="monospace" font-size="24" letter-spacing="4">CERTIFIED · VAULTED · MINTED ON SOLANA</text>
+</svg>`;
+}

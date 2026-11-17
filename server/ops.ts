@@ -2,6 +2,7 @@
 import type { Band, Currency, PackReveal, Redemption, TxResult } from '../shared/types.ts';
 import { bandOf, buybackOffer, marketPrice, packSplit } from '../shared/rules.ts';
 import { chain } from './chain.ts';
+import { queueBurn, queueMint } from './nft.ts';
 import { all, get, now, run, tx } from './db.ts';
 import {
   dropRow, dropStatus, fileComplete, getRules, redemptionOf, seriesRow, specimenRow, toReveal,
@@ -22,22 +23,22 @@ const currencyOf = (c: unknown): Currency => (c === 'SOL' ? 'SOL' : 'USDC');
 
 /* ---------- market ---------- */
 
-export function buyMarket(wallet: string, id: string, currency: unknown): { reveal: PackReveal; payment: TxResult; mint: string } {
+export function buyMarket(wallet: string, id: string, currency: unknown): { reveal: PackReveal; payment: TxResult; mint: string | null } {
   return tx(() => {
     const s = specimenRow(id) ?? fail(404, 'Specimen not found');
     if (s.state !== 'market' || s.vault_value_usd == null) fail(409, 'This specimen is no longer on the market');
     const rules = getRules();
     const price = marketPrice(s.vault_value_usd!, rules);
     const payment = chain.charge({ from: wallet, usd: price, currency: currencyOf(currency), solUsd: rules.sol_usd, memo: `market ${id}` });
-    const m = chain.mint({ owner: wallet, specimenId: id, name: s.name });
-    run("UPDATE specimens SET state = 'held', owner = ?, mint = ?, acquired_via = 'market', acquired_at = ?, paid_usd = ?, sold_back = 0, updated_at = ? WHERE id = ?",
-      wallet, m.mint, now(), price, now(), id);
+    run("UPDATE specimens SET state = 'held', owner = ?, acquired_via = 'market', acquired_at = ?, paid_usd = ?, sold_back = 0, updated_at = ? WHERE id = ?",
+      wallet, now(), price, now(), id);
+    queueMint(id, wallet);
     ledger('market_buy', { wallet, specimen_id: id, usd: price, currency: payment.currency, amount: payment.amount, tx: payment.tx, split: { vault_value: s.vault_value_usd, margin: cents(price - s.vault_value_usd!) } });
     const reveal: PackReveal = {
       pull_id: null, series_id: null, band: 'par', pack_price_usd: price, vault_value_usd: s.vault_value_usd!,
       specimen: { id: s.id, name: s.name, class: s.class.replace(', ', ' '), mass_g: s.mass_g, render: { type: s.category, seed: s.render_seed } },
     };
-    return { reveal, payment, mint: m.mint };
+    return { reveal, payment, mint: null };
   });
 }
 
@@ -53,11 +54,13 @@ export function revealSeed(s: SeriesRow) {
   run('UPDATE series SET seed_revealed = 1 WHERE id = ?', s.id);
 }
 
-export function openPack(wallet: string, seriesId: string, currency: unknown, clientSeedIn: unknown): { reveal: PackReveal; payment: TxResult; mint: string } {
+export function openPack(wallet: string, seriesId: string, currency: unknown, clientSeedIn: unknown, opts: { nft?: boolean } = {}): { reveal: PackReveal; payment: TxResult; mint: string | null } {
   const clientSeed = typeof clientSeedIn === 'string' && /^[\w-]{4,64}$/.test(clientSeedIn) ? clientSeedIn : uid('cs');
   return tx(() => {
     const s = seriesRow(seriesId) ?? fail(404, 'Series not found');
     if (s.status !== 'open') fail(409, s.status === 'sold_out' ? 'This series is sold out' : 'This series is not open');
+    const ends = (s as SeriesRow & { ends_at?: string | null }).ends_at;
+    if (ends && Date.now() > Date.parse(ends)) fail(409, 'This series has ended');
     if (s.drop_id) {
       const d = dropRow(s.drop_id);
       if (!d || dropStatus(d) !== 'open') fail(409, 'This launch drop is not open');
@@ -71,10 +74,10 @@ export function openPack(wallet: string, seriesId: string, currency: unknown, cl
     const slot = sealed[pick];
     const payment = chain.charge({ from: wallet, usd: s.pack_price_usd!, currency: currencyOf(currency), solUsd: rules.sol_usd, memo: `pack ${s.id}` });
     const sp = specimenRow(slot.specimen_id)!;
-    const m = chain.mint({ owner: wallet, specimenId: sp.id, name: sp.name });
     run('UPDATE slots SET opened_nonce = ? WHERE series_id = ? AND idx = ?', nonce, s.id, slot.idx);
-    run("UPDATE specimens SET state = 'held', owner = ?, mint = ?, series_id = NULL, acquired_via = 'pack', acquired_at = ?, paid_usd = ?, sold_back = 0, updated_at = ? WHERE id = ?",
-      wallet, m.mint, now(), s.pack_price_usd, now(), sp.id);
+    run("UPDATE specimens SET state = 'held', owner = ?, series_id = NULL, acquired_via = 'pack', acquired_at = ?, paid_usd = ?, sold_back = 0, updated_at = ? WHERE id = ?",
+      wallet, now(), s.pack_price_usd, now(), sp.id);
+    if (opts.nft !== false) queueMint(sp.id, wallet);
     const id = uid('pl');
     run(`INSERT INTO pulls (id, series_id, drop_id, specimen_id, wallet, band, pack_price_usd, vault_value_usd, nonce, client_seed, pool, pick, slot, bonus, tx, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
@@ -84,7 +87,7 @@ export function openPack(wallet: string, seriesId: string, currency: unknown, cl
       run("UPDATE series SET status = 'sold_out', sold_out_at = ? WHERE id = ?", now(), s.id);
       revealSeed(s);
     }
-    return { reveal: toReveal(get('SELECT * FROM pulls WHERE id = ?', id)), payment, mint: m.mint };
+    return { reveal: toReveal(get('SELECT * FROM pulls WHERE id = ?', id)), payment, mint: null };
   });
 }
 
@@ -103,9 +106,9 @@ export function sellBack(wallet: string, id: string): { payout: TxResult; usd: n
     if (s.vault_value_usd == null) fail(409, 'This specimen has no vault value');
     const usd = buybackOffer(s.vault_value_usd!, getRules());
     const payout = chain.payout({ to: wallet, usd, memo: `buyback ${id}` });
-    if (s.mint) chain.burn({ mint: s.mint, owner: wallet });
+    queueBurn(id);
     // A bought-back specimen goes into the next unopened series, never the current one.
-    run("UPDATE specimens SET state = 'vault', owner = NULL, mint = NULL, sold_back = 1, acquired_via = NULL, acquired_at = NULL, paid_usd = NULL, updated_at = ? WHERE id = ?", now(), id);
+    run("UPDATE specimens SET state = 'vault', owner = NULL, sold_back = 1, acquired_via = NULL, acquired_at = NULL, paid_usd = NULL, updated_at = ? WHERE id = ?", now(), id);
     ledger('buyback', { wallet, specimen_id: id, usd: -usd, currency: 'USDC', amount: -payout.amount, tx: payout.tx, split: { vault_value: s.vault_value_usd } });
     return { payout, usd };
   });
@@ -122,11 +125,11 @@ export function redeem(wallet: string, id: string, body: any): { redemption: Red
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address.email)) fail(400, 'Enter a valid email');
   if (!rules.shipping_countries.includes(address.country)) fail(400, 'We cannot ship to this country yet');
   return tx(() => {
-    const s = ownedBy(wallet, id);
+    ownedBy(wallet, id);
     const fee = cents(rules.handling_fee_usd + rules.shipping_usd);
     const payment = chain.charge({ from: wallet, usd: fee, currency: currencyOf(body?.currency), solUsd: rules.sol_usd, memo: `redeem ${id}` });
-    if (s.mint) chain.burn({ mint: s.mint, owner: wallet });
-    run("UPDATE specimens SET state = 'redeeming', mint = NULL, updated_at = ? WHERE id = ?", now(), id);
+    queueBurn(id);
+    run("UPDATE specimens SET state = 'redeeming', updated_at = ? WHERE id = ?", now(), id);
     const rid = uid('rd');
     run('INSERT INTO redemptions (id, specimen_id, wallet, name, address, status, fee_usd, tracking, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       rid, id, wallet, name, JSON.stringify(address), 'requested', fee, '', now(), now());

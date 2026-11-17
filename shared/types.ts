@@ -80,6 +80,12 @@ export interface Specimen {
   mint?: string | null;
   /** Owner's callsign, or short address ("7xKX…9fQ2"), when held. */
   owner?: string | null;
+  /** NFT state: none | pending (queued) | minted | burning | burned | failed. */
+  mint_status?: string;
+  /** Address that holds the NFT (vault address or the collector's linked wallet). */
+  nft_owner?: string | null;
+  /** Image photos from the file (listing photos), cover first. */
+  photos?: string[];
   /** Active collector listing, when the holder has put it up for sale. */
   listing?: { id: string; price_usd: number } | null;
   render: RenderHint;
@@ -169,6 +175,7 @@ export interface Rules {
   demo_wallet: boolean; // allow the demo wallet (no extension needed)
   sample_notice: boolean; // footer line "Sample data on this page"
   market_funds_buyback: boolean; // open decision 4
+  google_client_id: string; // Google sign-in (OAuth client ID, public)
 }
 
 export interface Series {
@@ -268,6 +275,7 @@ export interface PageData {
   drop: LaunchDrop | null;
   stats: PageStats;
   listings: Listing[];
+  chain: { cluster: string };
 }
 
 export interface Holding extends Specimen {

@@ -25,7 +25,7 @@ The first start creates `data/space-rocks.db` with the sample data (see below) a
 ## What works
 
 **Accounts**
-- Game-style sign-in screen: create an account with a callsign, email and password (scrypt-hashed), roll your collector rock (a procedural meteorite avatar), or sign in. Or use a Solana wallet: Phantom, Solflare or Backpack sign a one-time message (no transaction) and the server checks the ed25519 signature. A demo wallet lets anyone try the flow without signing up (turn it off in settings at launch).
+- Game-style sign-in screen: create an account with a callsign, email and password (scrypt-hashed) and roll your collector rock (a draggable 3D meteorite avatar), sign in, or **Continue with Google** (Google Identity Services; the server verifies the ID token against Google's keys). Google needs a public OAuth client ID in Admin › Rules & settings (or GOOGLE_CLIENT_ID); until then the button explains it is off. Wallet sign-in is hidden from the screen for now (the API remains); a Solana wallet can still be linked in account settings as the withdrawal wallet.
 - `/account`: your profile with level, rank and XP (earned by opening packs, hits, drops, trades, redemptions), the collection book (five classes, locked until found), your collection with sell-to-collectors, sell back, redeem and share, your listings, 12 achievements, activity, shipments, and settings (callsign, email, avatar, password, link a withdrawal wallet, sign out).
 - Collector market: list a specimen you hold at your price; it appears under “From collectors” in §01. The buyer pays, the seller receives the price minus the 3% royalty in USDC, the royalty goes to inventory. A listed specimen cannot be sold back or redeemed until it is taken off sale.
 
@@ -46,6 +46,12 @@ The first start creates `data/space-rocks.db` with the sample data (see below) a
 - Orders & ledger (CSV), collector listings (take down), collectors with callsign, email and holdings, waitlist (CSV), audit log of every admin change.
 - Rules & settings: markup, buyback share, bands and counts, EV target and edge split (validated), royalty, fees, ship-to countries, SOL quote price, demo wallet, sample notice.
 
+## NFTs on Solana (real, devnet by default)
+
+Every specimen a collector owns gets a real **Metaplex Core** NFT (`server/solana.ts`, queue in `server/nft.ts`): minted on a market purchase, pack pull or raffle with the specimen file as on-chain Attributes and a 3% Royalties plugin, transferred on a sale between collectors or a withdrawal to the linked wallet, burned on buyback or redemption. The vault authority is the asset's PermanentTransferDelegate and PermanentBurnDelegate, so it never needs the holder's signature. Metadata JSON and a generated card image are served at `/api/nft/<id>.json` and `.svg`. Purchases never wait for the chain: a worker processes the queue and retries; the reveal and the collection show the live status with an explorer link. Admin › Solana NFTs shows the authority, balance, queue and errors.
+
+**Funding:** the devnet RPC faucet is closed, so fund the authority address (shown in Admin › Solana NFTs, generated into `data/solana-authority.json`) at https://faucet.solana.com. Until then NFTs wait in the queue. `npm run chain:check` mints, transfers and burns a test asset to prove the path.
+
 ## What is simulated (to wire before mainnet)
 
 All on-chain effects go through one interface, `server/chain.ts`:
@@ -54,7 +60,7 @@ All on-chain effects go through one interface, `server/chain.ts`:
 |---|---|---|
 | `charge` | returns a fake signature | Solana Pay / USDC or SOL transfer, verified on-chain before the pull |
 | `payout` | fake signature | USDC from the treasury multisig |
-| `mint` / `burn` | fake addresses | Metaplex Core via Umi, specimen file as metadata, 3% royalty enforced |
+| NFTs | **real** Metaplex Core on devnet (see above) | same code on mainnet-beta with a funded authority |
 
 The draw is commit-reveal (`shared/fair.ts`): publish sha256(seed) at open, draw with HMAC-SHA256(seed, series:nonce:client seed), reveal the seed at sell-out. Swap in an on-chain VRF (Switchboard or ORAO) behind the same `drawPick` when the program exists. Launch drop resolution is recorded by the admin today; the brief's multisig signs it later. Social login (Google, X), email verification and password reset by email, withdrawing NFTs to the linked wallet, listings on external marketplaces (Tensor / Magic Eden) and the $ROCKS holder early access are not built.
 

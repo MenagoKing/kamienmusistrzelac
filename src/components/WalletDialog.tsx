@@ -1,7 +1,7 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../lib/api';
 import { callsign, useApp, type Dialog } from '../lib/store';
-import { WALLETS, signIn, signInDemo, signOut, type WalletId } from '../lib/wallet';
+import { signOut } from '../lib/wallet';
 import { AvatarStill, AvatarTurn, ROCK_LABEL, avatarRock } from './Avatar';
 import { Spinner } from './Overlay';
 
@@ -37,13 +37,12 @@ export function AuthDialog({ mode: initial = 'register', then }: { mode?: 'login
       }
     } catch (er: any) { setErr(er.message); } finally { setBusy(null); }
   };
-  const wallet = async (id: WalletId) => {
-    setBusy(id); setErr('');
-    try { await signIn(id); await done('Wallet connected'); } catch (e: any) { setErr(e?.message?.includes('User rejected') ? 'You declined the request in the wallet.' : e?.message || 'Could not connect.'); } finally { setBusy(null); }
-  };
-  const demo = async () => {
-    setBusy('demo'); setErr('');
-    try { await signInDemo(); await done('Demo wallet ready'); } catch (e: any) { setErr(e?.message || 'Could not start the demo wallet.'); } finally { setBusy(null); }
+  const google = async (credential: string) => {
+    setBusy('google'); setErr('');
+    try {
+      const r = await api<{ username: string | null; created: boolean }>('POST', '/api/auth/google', { credential });
+      await done(r.created ? `Welcome to the vault, ${r.username}` : `Welcome back${r.username ? ', ' + r.username : ''}`);
+    } catch (e: any) { setErr(e.message); } finally { setBusy(null); }
   };
 
   return (
@@ -95,19 +94,9 @@ export function AuthDialog({ mode: initial = 'register', then }: { mode?: 'login
             <button className="btn wide" type="submit" disabled={!!busy}>{busy === 'form' ? <><Spinner label="Working" />One moment…</> : mode === 'register' ? 'Create my collector account' : 'Enter the vault'}</button>
           </form>
 
-          <div className="or mono"><span>or use a Solana wallet</span></div>
-          <div className="wl tight">
-            {WALLETS.map(w => {
-              const has = typeof window !== 'undefined' && !!w.detect();
-              return has ? (
-                <button key={w.id} className="wrow" type="button" onClick={() => wallet(w.id)} disabled={!!busy}><b>{w.name}</b><span className="mono">{busy === w.id ? <Spinner label="Connecting" /> : 'Detected'}</span></button>
-              ) : (
-                <a key={w.id} className="wrow off" href={w.url} target="_blank" rel="noreferrer"><b>{w.name}</b><span className="mono">Install ↗</span></a>
-              );
-            })}
-            {data.rules.demo_wallet && <button className="wrow demo" type="button" onClick={demo} disabled={!!busy}><b>Demo wallet</b><span className="mono">{busy === 'demo' ? <Spinner label="Starting" /> : 'Try without signing up'}</span></button>}
-          </div>
-          <p className="fine">Payments on this preview run on a simulated chain: nothing is charged and no real NFT is minted.</p>
+          <div className="or mono"><span>or</span></div>
+          <GoogleButton clientId={data.rules.google_client_id} onCredential={google} busy={busy === 'google'} onError={setErr} />
+          <p className="fine">Every specimen you get is minted to you as an NFT on Solana. Payments on this preview are simulated: nothing is charged.</p>
         </div>
       </div>
     </div>
@@ -132,4 +121,52 @@ export function WalletButton({ small }: { small?: boolean }) {
 export async function disconnect(refresh: () => Promise<void>) {
   await signOut();
   await refresh();
+}
+
+/* ---------- Google ---------- */
+
+declare global { interface Window { google?: any } }
+let gsi: Promise<void> | null = null;
+const loadGsi = () => gsi ??= new Promise<void>((res, rej) => {
+  const s = document.createElement('script');
+  s.src = 'https://accounts.google.com/gsi/client'; s.async = true;
+  s.onload = () => res(); s.onerror = () => { gsi = null; rej(new Error('Could not load Google sign-in')); };
+  document.head.appendChild(s);
+});
+
+const GLogo = () => (
+  <svg viewBox="0 0 48 48" width="20" height="20" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.6 5.4 2.7 13.3l7.9 6.1C12.5 13.6 17.8 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.6 28.6c-.5-1.4-.8-3-.8-4.6s.3-3.2.8-4.6l-7.9-6.1C1 16.6 0 20.2 0 24s1 7.4 2.7 10.7l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.2 0-11.5-4.1-13.4-9.9l-7.9 6.1C6.6 42.6 14.6 48 24 48z"/></svg>
+);
+
+/** Google's own button when a client ID is set (Admin › Settings); a clear placeholder otherwise. */
+function GoogleButton({ clientId, onCredential, busy, onError }: { clientId: string; onCredential: (c: string) => void; busy: boolean; onError: (m: string) => void }) {
+  const box = useRef<HTMLDivElement>(null);
+  const [ready, setReady] = useState(false);
+  const cb = useRef(onCredential); cb.current = onCredential;
+  useEffect(() => {
+    if (!clientId) return;
+    let alive = true;
+    loadGsi().then(() => {
+      if (!alive || !box.current || !window.google) return;
+      window.google.accounts.id.initialize({ client_id: clientId, callback: (r: { credential: string }) => cb.current(r.credential), ux_mode: 'popup', auto_select: false });
+      window.google.accounts.id.renderButton(box.current, { theme: 'filled_black', size: 'large', shape: 'pill', text: 'continue_with', logo_alignment: 'center', width: Math.min(400, box.current.clientWidth || 360) });
+      setReady(true);
+    }).catch(e => onError(e.message));
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+  if (!clientId) {
+    return (
+      <button type="button" className="gbtn" onClick={() => onError('Google sign-in is not switched on yet. The site owner adds the Google client ID in Admin › Rules & settings.')}>
+        <GLogo /><span>Continue with Google</span>
+      </button>
+    );
+  }
+  return (
+    <div className="gwrap">
+      {busy && <div className="gbusy"><Spinner label="Signing in" /> Signing in with Google…</div>}
+      <div ref={box} className={'gbox' + (ready ? ' on' : '')} />
+      {!ready && <button type="button" className="gbtn" disabled><GLogo /><span>Loading Google…</span></button>}
+    </div>
+  );
 }

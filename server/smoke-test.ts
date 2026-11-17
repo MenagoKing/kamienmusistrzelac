@@ -7,8 +7,11 @@ import assert from 'node:assert/strict';
 
 process.env.DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sr-test-'));
 process.env.ADMIN_PASSWORD = 'test-password';
+process.env.CHAIN = 'simulated';
 const { handle } = await import('./app.ts');
 const { verifySeries } = await import('../shared/fair.ts');
+const { drain } = await import('./nft.ts');
+const settle = async () => { await drain(); await new Promise(r => setTimeout(r, 30)); await drain(); };
 
 const server = http.createServer(async (req, res) => { if (!(await handle(req, res))) { res.writeHead(404); res.end(); } });
 await new Promise<void>(r => server.listen(0, r));
@@ -30,7 +33,7 @@ const ok = async (method: string, url: string, body?: unknown, who = 'user') => 
 
 try {
   const page = await ok('GET', '/api/page');
-  assert.equal(page.market.length, 6);
+  assert.ok(page.market.length >= 20, 'market has the extra stock');
   assert.equal(page.series.id, '001');
   assert.equal(page.series.opened.length, 35);
   assert.equal(page.drop.locked.length, 3);
@@ -42,11 +45,20 @@ try {
   assert.equal(buy.payment.currency, 'SOL');
   const pack = await ok('POST', '/api/series/001/open', { currency: 'USDC', client_seed: 'hello-world' });
   console.log('pulled', pack.reveal.specimen.name, pack.reveal.band);
+  await settle();
   const me = await ok('GET', '/api/me');
   assert.equal(me.address, me0.address);
   assert.equal(me.holdings.length, 2);
+  for (const h of me.holdings) { assert.equal(h.mint_status, 'minted', 'NFT minted for ' + h.id); assert.ok(h.mint); assert.equal(h.nft_owner, me.address); }
+  const meta = await ok('GET', '/api/nft/' + me.holdings[0].id + '.json');
+  assert.ok(meta.attributes.some((a: any) => a.trait_type === 'Vault ID'));
+  assert.equal((await fetch(base + '/api/nft/' + me.holdings[0].id + '.svg')).headers.get('content-type'), 'image/svg+xml');
   const sb = await ok('POST', `/api/specimens/${pack.reveal.specimen.id}/sell-back`, {});
   assert.ok(sb.usd > 0);
+  await settle();
+  const burned = await ok('GET', '/api/specimens/' + pack.reveal.specimen.id);
+  assert.equal(burned.mint, null);
+  assert.equal(burned.mint_status, 'burned');
   const red = await ok('POST', '/api/specimens/SR-00007/redeem', { name: 'Test', line1: '1 Main St', city: 'Austin', postal: '78701', country: 'US', email: 't@example.com' });
   assert.equal(red.redemption.status, 'requested');
   assert.equal((await call('POST', '/api/specimens/SR-00007/redeem', { name: 'x', line1: 'x', city: 'x', postal: 'x', country: 'US', email: 't@example.com' })).status, 403);
@@ -61,7 +73,7 @@ try {
 
   const sp = await ok('POST', '/api/admin/specimens', { name: 'Seymchan', class: 'Pallasite, main group', category: 'pallasite', mass_g: 5, origin: 'Russia', fall: 'find', vault_value_usd: 90 }, 'admin');
   assert.equal(sp.state, 'draft');
-  const full = { ...sp, file: { bulletin: 'x', weigh_video: 'x', photos: ['x'], coa: 'x', provenance: 'x', invoice: 'x', capsule_tag: 'x' } };
+  const full = { ...sp, vault_id: 'V9-T01', file: { bulletin: 'x', weigh_video: 'x', photos: ['x'], coa: 'x', provenance: 'x', invoice: 'x', capsule_tag: 'x' } };
   const sp2 = await ok('PUT', `/api/admin/specimens/${sp.id}`, full, 'admin');
   assert.equal(sp2.state, 'vault');
   await ok('POST', `/api/admin/specimens/${sp.id}/list`, {}, 'admin');
@@ -111,7 +123,11 @@ try {
   const bought = await ok('POST', `/api/listings/${listing.id}/buy`, { currency: 'SOL' }, 'p2');
   assert.equal(bought.reveal.specimen.id, sell.id);
   assert.equal((await call('POST', `/api/listings/${listing.id}/buy`, {}, 'p2')).status, 409);
+  await settle();
   const p2me = await ok('GET', '/api/me', undefined, 'p2');
+  const moved = p2me.holdings.find((h: any) => h.id === sell.id);
+  assert.equal(moved.nft_owner, p2me.address, 'NFT transferred to the buyer');
+  assert.equal((await call('POST', '/api/auth/google', { credential: 'x.y.z' }, 'p5')).status, 503);
   assert.ok(p2me.holdings.some((h: any) => h.id === sell.id && h.acquired_via === 'secondary'));
   p1me = await ok('GET', '/api/me', undefined, 'p1');
   assert.equal(p1me.profile.stats.sold, 1);

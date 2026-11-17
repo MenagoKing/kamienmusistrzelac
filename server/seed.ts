@@ -131,18 +131,56 @@ export function seed() {
   // 35 packs already opened in Series 001 by sample collectors (real draws, like the design's board).
   const wallets = Array.from({ length: 9 }, () => b58encode(crypto.randomBytes(32)));
   for (const w of wallets) run("INSERT INTO wallets (address, kind, created_at, last_seen) VALUES (?, 'sample', ?, ?)", w, now(), now());
-  for (let i = 0; i < 35; i++) openPack(wallets[i % wallets.length], '001', i % 3 ? 'USDC' : 'SOL', 'seed' + i);
+  for (let i = 0; i < 35; i++) openPack(wallets[i % wallets.length], '001', i % 3 ? 'USDC' : 'SOL', 'seed' + i, { nft: false });
 }
 
 export function ensureSeeded() {
   if (!get('SELECT 1 FROM specimens LIMIT 1')) seed();
+  topUpMarket();
+  // Mars Window: exclusive until the current Earth-Mars launch window closes (dev note).
+  run("UPDATE series SET ends_at = '2026-12-31T23:59:59Z' WHERE id = 'MW' AND ends_at IS NULL");
 }
 
 export function reseed() {
   const tables = all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('sessions', 'sqlite_sequence')").map(t => t.name);
   tx(() => { for (const t of tables) db.exec(`DELETE FROM ${t}`); });
   seed();
+  topUpMarket();
 }
 
 export type { Band };
 export { bandOf };
+
+/** More fixed-price stock for the market (sample data). Runs once per database. */
+const MARKET_STOCK: [RockType, string, string, string, number | 'find', number, number][] = [
+  ['martian', 'NWA 6963', 'Martian, shergottite', 'Morocco', 'find', 0.62, 380],
+  ['martian', 'Tissint', 'Martian, shergottite', 'Morocco', 2011, 0.28, 175],
+  ['lunar', 'NWA 11273', 'Lunar, feldspathic breccia', 'Morocco', 'find', 0.85, 340],
+  ['lunar', 'Dhofar 1428', 'Lunar, regolith breccia', 'Oman', 'find', 0.4, 190],
+  ['pallasite', 'Seymchan', 'Pallasite, main group', 'Russia', 'find', 24.5, 410],
+  ['pallasite', 'Imilac', 'Pallasite, main group', 'Chile', 'find', 9.8, 230],
+  ['pallasite', 'Brenham', 'Pallasite, main group', 'USA', 'find', 4.1, 85],
+  ['iron', 'Muonionalusta', 'Iron, IVA', 'Sweden', 'find', 312.0, 960],
+  ['iron', 'Sikhote-Alin', 'Iron, IIAB', 'Russia', 1947, 58.3, 145],
+  ['iron', 'Gibeon', 'Iron, IVA', 'Namibia', 'find', 41.7, 98],
+  ['iron', 'Canyon Diablo', 'Iron, IAB', 'USA', 'find', 27.9, 64],
+  ['iron', 'Henbury', 'Iron, IIIAB', 'Australia', 'find', 16.4, 44],
+  ['stone', 'Chelyabinsk', 'Chondrite, LL5', 'Russia', 2013, 6.2, 72],
+  ['stone', 'Allende', 'Carbonaceous, CV3', 'Mexico', 1969, 11.3, 120],
+  ['stone', 'Aba Panu', 'Chondrite, L3', 'Nigeria', 2018, 14.6, 66],
+  ['stone', 'Viñales', 'Chondrite, L6', 'Cuba', 2019, 3.4, 58],
+  ['stone', 'NWA 869', 'Chondrite, L4-6', 'Morocco', 'find', 38.0, 46],
+  ['stone', 'Ozerki', 'Chondrite, L6', 'Russia', 2018, 2.2, 34],
+];
+
+export function topUpMarket() {
+  if (get("SELECT 1 FROM settings WHERE key = 'market_v2'")) return;
+  tx(() => {
+    const max = get<{ n: number | null }>("SELECT MAX(CAST(substr(id, 4) AS INTEGER)) n FROM specimens")!.n ?? 1000;
+    seq = Math.max(seq, max, 2000);
+    MARKET_STOCK.forEach(([cat, name, cls, origin, fall, mass, value], i) => {
+      insert({ name, cls, cat, mass, origin, fall, value, state: 'market', seed: 101 + i * 17 });
+    });
+    run("INSERT INTO settings (key, value) VALUES ('market_v2', '1')");
+  });
+}

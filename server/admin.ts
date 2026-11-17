@@ -3,6 +3,7 @@ import type { Band, DropEventKind, RockType, Rules, SpecimenFile, Tier } from '.
 import { FILE_ITEMS } from '../shared/types.ts';
 import { BANDS, bandOf, checkSeries } from '../shared/rules.ts';
 import { chain } from './chain.ts';
+import { queueMint } from './nft.ts';
 import { all, get, now, run, tx } from './db.ts';
 import { addSlots, audit, closeSeries, ledger, pullCount, sealedSlots } from './ops.ts';
 import {
@@ -103,7 +104,7 @@ export function createSpecimen(actor: string, b: any) {
   const d = readSpecimen(b);
   return tx(() => {
     const id = nextSpecimenId();
-    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: d.vault_value_usd });
+    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: d.vault_value_usd, vault_id: d.vault_id });
     run(`INSERT INTO specimens (id, name, class, category, mass_g, origin, fall, vault_value_usd, state, vault_id, file, notes, render_seed, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id, d.name, d.class, d.category, d.mass_g, d.origin, d.fall, d.vault_value_usd, complete ? 'vault' : 'draft', d.vault_id, JSON.stringify(d.file), d.notes, d.render_seed, now(), now());
@@ -118,7 +119,7 @@ export function updateSpecimen(actor: string, id: string, b: any) {
     const s = specimenRow(id) ?? fail(404, 'Specimen not found');
     const valueLocked = ['series', 'locked', 'held', 'redeeming', 'redeemed'].includes(s.state);
     if (valueLocked && d.vault_value_usd !== s.vault_value_usd) fail(409, `The vault value is fixed while the specimen is ${s.state === 'series' ? 'sealed in a series' : s.state}`);
-    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: d.vault_value_usd });
+    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: d.vault_value_usd, vault_id: d.vault_id });
     let state = s.state;
     if (state === 'draft' && complete) state = 'vault';
     if ((state === 'vault' || state === 'market') && !complete) state = 'draft';
@@ -468,13 +469,13 @@ export function dropEvent(actor: string, id: string, b: any) {
         }
         const w = wallets[drawPickSync(d.server_seed, d.id, i, 'raffle', wallets.length)];
         const sp = specimenRow(l.specimen_id)!;
-        const m = chain.mint({ owner: w, specimenId: sp.id, name: sp.name });
-        run("UPDATE specimens SET state = 'held', owner = ?, mint = ?, drop_id = NULL, acquired_via = 'raffle', acquired_at = ?, paid_usd = 0, updated_at = ? WHERE id = ?", w, m.mint, now(), now(), sp.id);
+        run("UPDATE specimens SET state = 'held', owner = ?, drop_id = NULL, acquired_via = 'raffle', acquired_at = ?, paid_usd = 0, updated_at = ? WHERE id = ?", w, now(), now(), sp.id);
+        queueMint(sp.id, w);
         run("UPDATE drop_locks SET state = 'raffled' WHERE drop_id = ? AND specimen_id = ?", id, l.specimen_id);
         const band = (s?.pack_price_usd ? bandOf(sp.vault_value_usd!, s.pack_price_usd, getRules()) : null) ?? 'hit';
         run(`INSERT INTO pulls (id, series_id, drop_id, specimen_id, wallet, band, pack_price_usd, vault_value_usd, nonce, client_seed, pool, pick, slot, bonus, tx, created_at)
-             VALUES (?, NULL, ?, ?, ?, ?, 0, ?, ?, 'raffle', ?, NULL, NULL, 1, ?, ?)`, uid('pl'), id, sp.id, w, band, sp.vault_value_usd, i, wallets.length, m.tx, now());
-        ledger('raffle', { wallet: w, specimen_id: sp.id, usd: 0, currency: 'USDC', amount: 0, tx: m.tx, split: { vault_value: sp.vault_value_usd } });
+             VALUES (?, NULL, ?, ?, ?, ?, 0, ?, ?, 'raffle', ?, NULL, NULL, 1, ?, ?)`, uid('pl'), id, sp.id, w, band, sp.vault_value_usd, i, wallets.length, null, now());
+        ledger('raffle', { wallet: w, specimen_id: sp.id, usd: 0, currency: 'USDC', amount: 0, tx: null, split: { vault_value: sp.vault_value_usd } });
         won.push({ specimen: sp.id, wallet: w });
       });
       // Anything still locked (Batch A never unlocked) rolls over.
@@ -530,8 +531,8 @@ export function updateRedemption(actor: string, id: string, b: any) {
     if (status === 'cancelled') {
       // Re-mint to the collector and refund the fee.
       const sp = specimenRow(r.specimen_id)!;
-      const m = chain.mint({ owner: r.wallet, specimenId: sp.id, name: sp.name });
-      run("UPDATE specimens SET state = 'held', mint = ?, updated_at = ? WHERE id = ?", m.mint, now(), sp.id);
+      run("UPDATE specimens SET state = 'held', updated_at = ? WHERE id = ?", now(), sp.id);
+      queueMint(sp.id, r.wallet);
       const p = chain.payout({ to: r.wallet, usd: r.fee_usd, memo: 'redemption refund' });
       ledger('redemption_refund', { wallet: r.wallet, specimen_id: sp.id, usd: -r.fee_usd, currency: 'USDC', amount: -r.fee_usd, tx: p.tx });
     }
@@ -595,7 +596,9 @@ export function updateRules(actor: string, b: any): Rules {
     demo_wallet: typeof b?.demo_wallet === 'boolean' ? b.demo_wallet : cur.demo_wallet,
     sample_notice: typeof b?.sample_notice === 'boolean' ? b.sample_notice : cur.sample_notice,
     market_funds_buyback: typeof b?.market_funds_buyback === 'boolean' ? b.market_funds_buyback : cur.market_funds_buyback,
+    google_client_id: typeof b?.google_client_id === 'string' ? b.google_client_id.trim().slice(0, 200) : cur.google_client_id,
   };
+  if (r.google_client_id && !/^[\w.-]+\.apps\.googleusercontent\.com$/.test(r.google_client_id)) fail(400, 'The Google client ID looks like 1234-abc.apps.googleusercontent.com');
   if (r.buyback_share >= 1) fail(400, 'The buyback share must stay below 100% of vault value');
   const edge = r.edge_split.rocks_buyback + r.edge_split.launch_reserve + r.edge_split.ops;
   if (Math.abs(edge - (1 - r.ev_target)) > 0.0001) fail(400, `The edge split adds up to ${Math.round(edge * 1000) / 10}%, but 100% − EV target is ${Math.round((1 - r.ev_target) * 1000) / 10}%`);

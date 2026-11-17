@@ -21,6 +21,7 @@ export const DEFAULT_RULES: Rules = {
   demo_wallet: true,
   sample_notice: true,
   market_funds_buyback: false,
+  google_client_id: '',
 };
 
 export const BANDS: Band[] = ['floor', 'par', 'hit'];

@@ -5,6 +5,7 @@ import { embeddedPageData, getPageData } from './data';
 import './styles/site.css';
 import './styles/app.css';
 import './styles/account.css';
+import './styles/v3.css';
 
 const root = document.getElementById('root')!;
 const fail = () => {

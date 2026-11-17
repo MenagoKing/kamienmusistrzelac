@@ -5,6 +5,7 @@ import type { Currency, Listing, TxResult } from '../shared/types.ts';
 import { chain } from './chain.ts';
 import { all, get, now, run, tx } from './db.ts';
 import { ledger } from './ops.ts';
+import { nftOwnerOf, queueTransfer } from './nft.ts';
 import { activeListing, displayName, getRules, specimenRow, toListing, type ListingRow, type SpecimenRow } from './store.ts';
 import { cents, fail, num, uid } from './util.ts';
 
@@ -50,6 +51,7 @@ export function buyListing(buyer: string, id: string, currency: unknown): { list
     const payment = chain.charge({ from: buyer, usd: l.price_usd, currency: cur, solUsd: rules.sol_usd, memo: `secondary ${l.id}` });
     const payout = chain.payout({ to: l.seller, usd: payoutUsd, memo: `sale ${l.id}` });
     run("UPDATE specimens SET owner = ?, acquired_via = 'secondary', acquired_at = ?, paid_usd = ?, updated_at = ? WHERE id = ?", buyer, now(), l.price_usd, now(), s.id);
+    queueTransfer(s.id, nftOwnerOf(buyer));
     run("UPDATE listings SET status = 'sold', buyer = ?, closed_at = ? WHERE id = ?", buyer, now(), id);
     ledger('secondary_sale', { wallet: buyer, specimen_id: s.id, usd: l.price_usd, currency: payment.currency, amount: payment.amount, tx: payment.tx, split: { seller_payout: payoutUsd, royalty, listing: l.id } });
     ledger('seller_payout', { wallet: l.seller, specimen_id: s.id, usd: -payoutUsd, currency: 'USDC', amount: -payout.amount, tx: payout.tx, split: { listing: l.id, royalty } });

@@ -1,68 +1,104 @@
-import { useState } from 'react';
-import type { Listing, Specimen } from '../data';
+import { useMemo, useRef, useState } from 'react';
+import type { Listing, RockType, Specimen } from '../data';
 import { useApp } from '../lib/store';
-import { useStill } from '../lib/stills';
 import { marketPrice, mass, originLabel, usd } from '../lib/format';
+import { RockView } from './RockView';
 
-function Lot({ p, i }: { p: Specimen; i: number }) {
-  const { data, withWallet } = useApp();
-  const img = useStill(p.render, { w: 420, h: 311, rot: -2.2 + i * .17, scale: 1.25 }, p.photo);
+const CLASSES: [RockType | '', string][] = [['', 'All'], ['martian', 'Martian'], ['lunar', 'Lunar'], ['pallasite', 'Pallasite'], ['iron', 'Iron'], ['stone', 'Chondrite']];
+const RARITY: Record<RockType, number> = { martian: 0, lunar: 1, pallasite: 2, iron: 3, stone: 4 };
+const LABEL: Record<RockType, string> = { martian: 'Martian', lunar: 'Lunar', pallasite: 'Pallasite', iron: 'Iron', stone: 'Chondrite' };
+
+interface Item { key: string; sp: Specimen; price: number; seller?: string; mine?: boolean; listing?: Listing }
+
+function Card({ it, big }: { it: Item; big?: boolean }) {
+  const { withWallet, toast } = useApp();
+  const ref = useRef<HTMLElement>(null);
+  const p = it.sp;
+  const buy = () => {
+    if (it.mine) return toast('That one is yours: manage it from your account');
+    withWallet(it.listing ? { kind: 'buy-listing', listing: it.listing } : { kind: 'buy', specimen: p });
+  };
   return (
-    <article className="lot">
-      <img alt={`${p.name}, ${p.class}`} width={420} height={311} src={img} />
-      <div className="top mono"><span>{p.id}</span><span>{originLabel(p)}</span></div>
-      <h3>{p.name}</h3>
-      <div className="cl">{p.class} · {mass(p.mass_g)}</div>
-      {p.vault_value_usd != null && (
-        <div className="px"><b>{usd(marketPrice(p.vault_value_usd, data.rules))}</b><small className="mono">Vault value {usd(p.vault_value_usd)}</small></div>
-      )}
-      <button type="button" className="buy" onClick={() => withWallet({ kind: 'buy', specimen: p })}>Buy {p.name}</button>
+    <article ref={ref} className={'mcard ' + p.render.type + (big ? ' big' : '')} onClick={buy}>
+      <div className="mcard-ph">
+        <RockView hint={p.render} mode="hover" level={6} scale={big ? 1.32 : 1.28} hoverRef={ref} label={`${p.name} in 3D. Drag to turn it.`} />
+        <span className="mcard-cls mono">{LABEL[p.render.type]}</span>
+        {(p.photos?.length ?? 0) > 0 && <span className="mcard-ph-n mono" title="Photos from the vault">◉ {p.photos!.length}</span>}
+        <span className="mcard-drag mono" aria-hidden="true">Drag to turn</span>
+      </div>
+      <div className="mcard-bd">
+        <div className="mcard-top mono"><span>{p.id}</span><span>{it.seller ? (it.mine ? 'Your listing' : `by ${it.seller}`) : originLabel(p)}</span></div>
+        <h3>{p.name}</h3>
+        <div className="mcard-cl">{p.class} · {mass(p.mass_g)}</div>
+        <div className="mcard-px">
+          <div><b>{usd(it.price)}</b>{p.vault_value_usd != null && <small className="mono">Vault value {usd(p.vault_value_usd)}</small>}</div>
+          <button type="button" className="btn sm" onClick={e => { e.stopPropagation(); buy(); }} aria-label={`Buy ${p.name} for ${usd(it.price)}`}>{it.mine ? 'Yours' : 'Buy'}</button>
+        </div>
+      </div>
     </article>
   );
 }
 
-function CollectorLot({ l, i }: { l: Listing; i: number }) {
-  const { me, withWallet, toast } = useApp();
-  const p = l.specimen;
-  const img = useStill(p.render, { w: 420, h: 311, rot: -2.2 + i * .17, scale: 1.25 }, p.photo);
-  const mine = l.mine || (me && p.owner === me.profile.username);
-  return (
-    <article className="lot">
-      <img alt={`${p.name}, ${p.class}`} width={420} height={311} src={img} />
-      <div className="top mono"><span>{p.id}</span><span className="by">{mine ? 'Your listing' : `Listed by ${l.seller}`}</span></div>
-      <h3>{p.name}</h3>
-      <div className="cl">{p.class} · {mass(p.mass_g)}</div>
-      <div className="px"><b>{usd(l.price_usd)}</b>{p.vault_value_usd != null && <small className="mono">Vault value {usd(p.vault_value_usd)}</small>}</div>
-      <button type="button" className="buy" onClick={() => (mine ? toast('That one is yours: manage it from your account') : withWallet({ kind: 'buy-listing', listing: l }))}>Buy {p.name} from {l.seller}</button>
-    </article>
-  );
-}
-
-/** §01 The market: the vault's fixed-price listings, and specimens collectors put up for sale. */
+/** §01 The market: fixed-price specimens from the vault and from collectors, in an expandable catalogue. */
 export function Market() {
   const { data } = useApp();
+  const [open, setOpen] = useState(false);
   const [tab, setTab] = useState<'vault' | 'collectors'>('vault');
-  const collectors = data.listings ?? [];
+  const [cls, setCls] = useState<RockType | ''>('');
+  const [sort, setSort] = useState<'featured' | 'low' | 'high' | 'mass'>('featured');
+  const [q, setQ] = useState('');
+  const vault: Item[] = useMemo(() => data.market.filter(p => p.vault_value_usd != null).map(p => ({ key: p.id, sp: p, price: marketPrice(p.vault_value_usd!, data.rules) })), [data.market, data.rules]);
+  const collectors: Item[] = useMemo(() => (data.listings ?? []).map(l => ({ key: l.id, sp: l.specimen, price: l.price_usd, seller: l.seller, mine: l.mine, listing: l })), [data.listings]);
+  const featured = useMemo(() => [...vault].sort((a, b) => RARITY[a.sp.render.type] - RARITY[b.sp.render.type] || b.price - a.price).slice(0, 3), [vault]);
+  const list = useMemo(() => {
+    let l = (tab === 'vault' ? vault : collectors).filter(x => (!cls || x.sp.render.type === cls) && (!q || (x.sp.name + ' ' + x.sp.class + ' ' + x.sp.id).toLowerCase().includes(q.toLowerCase())));
+    if (sort === 'low') l = [...l].sort((a, b) => a.price - b.price);
+    if (sort === 'high') l = [...l].sort((a, b) => b.price - a.price);
+    if (sort === 'mass') l = [...l].sort((a, b) => b.sp.mass_g - a.sp.mass_g);
+    if (sort === 'featured') l = [...l].sort((a, b) => RARITY[a.sp.render.type] - RARITY[b.sp.render.type] || b.price - a.price);
+    return l;
+  }, [tab, vault, collectors, cls, q, sort]);
+  const prices = vault.map(v => v.price);
+  const range = prices.length ? `${usd(Math.min(...prices))} to ${usd(Math.max(...prices))}` : '';
+
   return (
     <section className="s wrap" id="market" aria-labelledby="h-market">
       <div className="intro rv">
         <div><div className="sec mono"><span>§01</span><span>The market</span></div><h2 id="h-market">Pick the rock. Pay the price.</h2></div>
         <p>Every specimen in the vault is listed on its own, at one fixed price set from its documented purchase price. No draw, no luck: you see the exact rock you buy, with its whole file.</p>
       </div>
-      <div className="stabs mtabs rv" role="tablist" aria-label="Market">
-        <button role="tab" type="button" aria-selected={tab === 'vault'} className={tab === 'vault' ? 'on' : ''} onClick={() => setTab('vault')}>From the vault · {data.market.length}</button>
-        <button role="tab" type="button" aria-selected={tab === 'collectors'} className={tab === 'collectors' ? 'on' : ''} onClick={() => setTab('collectors')}>From collectors · {collectors.length}</button>
+
+      <div className="mfeat rv in">
+        {featured.map(it => <Card key={it.key} it={it} big />)}
       </div>
-      {tab === 'vault' ? (
-        data.market.length ? (
-          <div className="mkt rv in" id="mkt">{data.market.map((p, i) => <Lot key={p.id} p={p} i={i} />)}</div>
-        ) : <p className="mkt-empty">Everything listed has found a home. New specimens are being filed; the next listings appear here first.</p>
-      ) : (
-        collectors.length ? (
-          <div className="mkt rv in">{collectors.map((l, i) => <CollectorLot key={l.id} l={l} i={i} />)}</div>
-        ) : <p className="mkt-empty">No collector has a specimen up for sale right now. Yours can be the first: open your account and choose “Sell to collectors”.</p>
-      )}
-      <div className="rule mono rv"><span>{tab === 'vault' ? 'Fixed price per specimen' : 'Prices set by collectors'}</span><span>Full file on every listing</span><span>{tab === 'vault' ? 'Minted to your wallet when you buy' : `${Math.round(data.rules.royalty * 100)}% goes back to the vault`}</span></div>
+
+      <div className={'mpanel' + (open ? ' is-open' : '')}>
+        <button type="button" className="mtoggle" aria-expanded={open} aria-controls="market-all" onClick={() => setOpen(!open)}>
+          <span className="mtoggle-t"><b>{open ? 'Close the market' : 'Open the full market'}</b><span className="mono">{vault.length} from the vault{range && ` · ${range}`} · {collectors.length} from collectors</span></span>
+          <i aria-hidden="true" />
+        </button>
+        <div className="mbody" id="market-all" hidden={!open}>
+          {open && (
+            <>
+              <div className="mbar">
+                <div className="stabs" role="tablist" aria-label="Market">
+                  <button role="tab" type="button" aria-selected={tab === 'vault'} className={tab === 'vault' ? 'on' : ''} onClick={() => setTab('vault')}>From the vault · {vault.length}</button>
+                  <button role="tab" type="button" aria-selected={tab === 'collectors'} className={tab === 'collectors' ? 'on' : ''} onClick={() => setTab('collectors')}>From collectors · {collectors.length}</button>
+                </div>
+                <input className="msearch" type="search" placeholder="Search name, class or SR number" value={q} onChange={e => setQ(e.target.value)} aria-label="Search the market" />
+                <select className="msort" value={sort} onChange={e => setSort(e.target.value as typeof sort)} aria-label="Sort">
+                  <option value="featured">Rarest first</option><option value="low">Price, low to high</option><option value="high">Price, high to low</option><option value="mass">Heaviest first</option>
+                </select>
+              </div>
+              <div className="chips mchips">{CLASSES.map(([k, l]) => <button key={k} type="button" className={cls === k ? 'on' : ''} onClick={() => setCls(k)}>{l}</button>)}</div>
+              {list.length ? <div className="mgrid">{list.map(it => <Card key={it.key} it={it} />)}</div> : (
+                <p className="mkt-empty">{tab === 'collectors' && !collectors.length ? 'No collector has a specimen up for sale right now. Yours can be the first: open your account and choose “Sell to collectors”.' : 'Nothing matches. Try another class or clear the search.'}</p>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      <div className="rule mono rv"><span>Fixed price per specimen</span><span>Full file on every listing</span><span>Minted to you as an NFT when you buy</span></div>
     </section>
   );
 }

@@ -88,6 +88,15 @@ export function Settings() {
           <p className="dim small">Customs and sanctions screening happen before a country is added.</p>
         </Card>
 
+        <Card title="Sign in with Google">
+          <div className="form-grid">
+            <Field label="Google OAuth client ID" span={3} hint={<>Create it in Google Cloud Console › APIs &amp; Services › Credentials › OAuth client ID › Web application. Add your site address (and http://localhost:5173 for testing) under Authorized JavaScript origins. Only the public client ID goes here; no secret is needed.</>}>
+              <input value={r.google_client_id} onChange={e => set({ google_client_id: e.target.value })} placeholder="1234567890-abc123.apps.googleusercontent.com" />
+            </Field>
+          </div>
+          <p className="dim small">{r.google_client_id ? 'Google sign-in is on: the button appears on the sign-in screen.' : 'Off until a client ID is saved. The sign-in screen shows the button and explains it is not switched on yet.'}</p>
+        </Card>
+
         <Card title="Chain and site">
           <div className="form-grid">
             <Field label="SOL price for quotes, USD" hint="Simulated chain. A live price feed replaces this on mainnet."><input type="number" step="0.01" value={r.sol_usd} onChange={e => set({ sol_usd: Number(e.target.value) })} /></Field>

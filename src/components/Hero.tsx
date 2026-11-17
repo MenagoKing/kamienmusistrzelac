@@ -2,7 +2,8 @@ import { useEffect, useRef } from 'react';
 import { Logo, NavList } from './Logo';
 import { WalletButton } from './WalletDialog';
 import { MobileMenu } from './MobileMenu';
-import { gpuRatio, isStill, light, once, scene } from '../lib/scene';
+import { gpuRatio, isStill, isTouch, light, once, scene } from '../lib/scene';
+import { buildRock } from '../lib/rockbuild';
 
 export function Hero() {
   const sky = useRef<HTMLCanvasElement>(null);
@@ -22,13 +23,19 @@ export function Hero() {
         const R = RK.mulberry(9); S = [];
         for (let i = 0; i < Math.round(w * h / 2600); i++) { const y = Math.pow(R(), 1.6) * h * .8; S.push([R() * w * d, y * d, (R() < .06 ? 1.3 : .6 + R() * .5) * d, R() * 6.28, .25 + R() * .6]); }
       };
-      stars(); new ResizeObserver(stars).observe(cv);
+      // Phones: draw the stars once; the twinkle redraws hundreds of dots every frame.
+      const still = shot || isTouch();
+      stars(); new ResizeObserver(() => { stars(); if (still) paint(0); }).observe(cv);
       let skyOn = true; new IntersectionObserver(e => { skyOn = e[0].isIntersecting; }).observe(cv);
-      (function tw(t: number) {
-        if (!shot) requestAnimationFrame(tw);
-        if (!skyOn && !shot) return;
-        sx.clearRect(0, 0, cv.width, cv.height);
+      function paint(t: number) {
+        sx.clearRect(0, 0, cv!.width, cv!.height);
         for (const s of S) { const a = s[4] * (.75 + .25 * Math.sin((t || 0) * .0012 + s[3])); sx.fillStyle = `rgba(255,240,225,${a})`; sx.beginPath(); sx.arc(s[0], s[1], s[2], 0, 6.283); sx.fill(); }
+      }
+      if (still) paint(0);
+      else (function tw(t: number) {
+        requestAnimationFrame(tw);
+        if (!skyOn) return;
+        paint(t);
       })(0);
     });
   }, []);
@@ -38,13 +45,18 @@ export function Hero() {
     const c = stage.current;
     if (!once(c)) return;
     scene().then(({ RK, THREE }) => {
-      const r = RK.renderer(c, 1.05); r.setPixelRatio(gpuRatio()); const sc = new THREE.Scene(); const cam = new THREE.PerspectiveCamera(27, 1, .1, 100); cam.position.set(0, 0, 10); light(sc, r);
-      const rock = RK.rock({ type: 'martian', seed: 21, level: 6, stretch: [1.14, .8, .94], chips: 5, dents: .05, cut: [.62, .12, .78], cutD: .4, bump: .008 }); sc.add(rock);
+      const r = RK.renderer(c, 1.05); r.setPixelRatio(isTouch() ? Math.min(devicePixelRatio || 1, 1.25) : gpuRatio()); const sc = new THREE.Scene(); const cam = new THREE.PerspectiveCamera(27, 1, .1, 100); cam.position.set(0, 0, 10); light(sc, r);
+      // The rock is built in a worker; until it arrives the sky and dust render on their own.
+      let rock: any = null;
+      buildRock({ type: 'martian', seed: 21, level: 6, stretch: [1.14, .8, .94], chips: 5, dents: .05, cut: [.62, .12, .78], cutD: .4, bump: .008 }).then(m => { rock = m; sc.add(m); });
+      const touch = isTouch(); let frameN = 0;
       const n = 360, pp = new Float32Array(n * 3), R = RK.mulberry(5); for (let i = 0; i < n; i++) { pp[i * 3] = (R() - .5) * 9; pp[i * 3 + 1] = (R() - .5) * 6; pp[i * 3 + 2] = (R() - .5) * 5; }
       const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(pp, 3));
       const dust = new THREE.Points(dg, new THREE.PointsMaterial({ size: .018, color: 0xffb08a, transparent: true, opacity: .5, depthWrite: false, blending: THREE.AdditiveBlending })); sc.add(dust);
       let sy = 0; addEventListener('scroll', () => { sy = scrollY; }, { passive: true });
       RK.run(c, r, cam, (t: number) => {
+        if (touch && (frameN++ & 1)) return; // phones: 30 fps is plenty for a slow turn
+        if (!rock) { r.render(sc, cam); return; }
         const hh = Math.tan(cam.fov * Math.PI / 360) * cam.position.z, half = hh * cam.aspect, wide = cam.aspect > 1.15;
         rock.position.set(wide ? half * .43 : 0, wide ? hh * .06 : hh * .5, 0); rock.scale.setScalar(wide ? Math.min(2.3, half * .37) : Math.min(.8, half * .56));
         rock.rotation.set(.3 + Math.sin(t * .21) * .05 + Math.min(sy, 1500) * .0004, -2.25 + t * .1 + Math.min(sy, 1500) * .0012, .1); rock.position.y += Math.sin(t * .55) * .045;

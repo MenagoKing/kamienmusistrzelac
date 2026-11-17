@@ -16,6 +16,12 @@ export function AuthDialog({ mode: initial = 'register', then }: { mode?: 'login
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const rock = avatarRock(seed);
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    addEventListener('keydown', k);
+    document.documentElement.classList.add('locked');
+    return () => { removeEventListener('keydown', k); document.documentElement.classList.remove('locked'); };
+  }, [close]);
 
   const done = async (msg: string) => {
     await refresh();
@@ -56,6 +62,7 @@ export function AuthDialog({ mode: initial = 'register', then }: { mode?: 'login
           {mode === 'register' ? (
             <div className="auth-av">
               <AvatarTurn seed={seed} size={240} />
+              <button type="button" className="auth-roll" onClick={() => setSeed(rnd())} aria-label="Roll another rock">↻</button>
               <div className="auth-card">
                 <span className="mono">Your collector rock</span>
                 <b>{name.trim() || 'Your callsign'}</b>
@@ -76,13 +83,13 @@ export function AuthDialog({ mode: initial = 'register', then }: { mode?: 'login
           <form className="fm" onSubmit={submit} key={mode}>
             {mode === 'register' ? (
               <>
-                <label>Callsign<input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" autoComplete="username" value={name} onChange={e => setName(e.target.value)} placeholder="meteor_hunter" data-autofocus /></label>
+                <label>Callsign<input name="username" required minLength={3} maxLength={20} pattern="[A-Za-z0-9_]{3,20}" title="3 to 20 letters, numbers or _" autoComplete="username" value={name} onChange={e => setName(e.target.value)} placeholder="meteor_hunter" data-autofocus /></label>
                 <label>Email<input name="email" type="email" required autoComplete="email" placeholder="you@email.com" /></label>
-                <div className="two">
-                  <label>Password<input name="password" type="password" required minLength={8} autoComplete="new-password" /></label>
-                  <label>Repeat it<input name="password2" type="password" required minLength={8} autoComplete="new-password" /></label>
+                <div className="two auth-pw">
+                  <label>Password<input name="password" type="password" required minLength={8} title="At least 8 characters" autoComplete="new-password" placeholder="8+ characters" /></label>
+                  <label>Repeat it<input name="password2" type="password" required minLength={8} autoComplete="new-password" placeholder="once more" /></label>
                 </div>
-                <p className="fine">3 to 20 letters, numbers or _. Password at least 8 characters.</p>
+                <p className="fine auth-help">3 to 20 letters, numbers or _. Password at least 8 characters.</p>
               </>
             ) : (
               <>
@@ -96,7 +103,7 @@ export function AuthDialog({ mode: initial = 'register', then }: { mode?: 'login
 
           <div className="or mono"><span>or</span></div>
           <GoogleButton clientId={data.rules.google_client_id} onCredential={google} busy={busy === 'google'} onError={setErr} />
-          <p className="fine">Every specimen you get is minted to you as an NFT on Solana. Payments on this preview are simulated: nothing is charged.</p>
+          <p className="fine auth-fine">Every specimen you get is minted to you as an NFT on Solana. Payments on this preview are simulated: nothing is charged.</p>
         </div>
       </div>
     </div>

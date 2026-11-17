@@ -1,0 +1,42 @@
+/* Sign-in screen on phones: everything on one screen, no scrolling. */
+.auth-roll{display:none}
+
+@media (max-width:700px){
+  .auth{display:flex;flex-direction:column}
+  .auth-in{flex:1;width:100%;margin:0;display:flex;flex-direction:column;justify-content:center;align-items:stretch;gap:14px;min-height:100%;padding:calc(14px + env(safe-area-inset-top,0px)) 16px calc(14px + env(safe-area-inset-bottom,0px))}
+
+  /* top row: the turning rock beside the title */
+  .auth-hero{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"av title";align-items:center;gap:12px;padding-right:44px}
+  .auth-hero .sec,.auth-card,.auth-lead{display:none}
+  .auth-hero h2{grid-area:title;margin:0;font-size:clamp(30px,8.6vw,40px);line-height:.95}
+  .auth-av{grid-area:av;position:relative;display:block}
+  .auth-av .avturn{width:92px!important;height:92px!important}
+  .auth-roll{display:grid;place-items:center;position:absolute;right:-4px;bottom:-2px;width:32px;height:32px;border-radius:50%;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-size:16px;cursor:pointer;z-index:2}
+  .auth-x{top:calc(12px + env(safe-area-inset-top,0px));right:12px;width:40px;height:40px}
+
+  /* form: tight but comfortable */
+  .auth-form{padding:14px 14px 12px;border-radius:20px}
+  .auth-form .tabs{margin-bottom:10px}
+  .auth-form .tabs button{min-height:40px;padding:8px 10px;font-size:14.5px}
+  .auth .fm{gap:9px}
+  .auth .fm label{gap:5px;font-size:10px}
+  .auth .fm input{min-height:44px;padding:0 12px}
+  .auth .fm,.auth-form{min-width:0}
+  .auth .fm{grid-template-columns:minmax(0,1fr)}
+  .auth .fm label{min-width:0}
+  .auth .fm input{width:100%;min-width:0;box-sizing:border-box}
+  .auth .fm .two,.auth .fm .auth-pw{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px}
+  .auth .btn.wide{min-height:48px;margin-top:6px;position:static;box-shadow:none}
+  .auth-help,.auth-fine{display:none}
+  .auth .or{margin:10px 0 8px}
+  .auth .gbtn{min-height:46px}
+  .auth .err{margin:6px 0 0;padding:8px 10px;font-size:13px}
+}
+
+/* very short screens (iPhone SE, landscape): drop the rock row */
+@media (max-width:700px) and (max-height:640px){
+  .auth-av{display:none}
+  .auth-hero{grid-template-columns:1fr;grid-template-areas:"title"}
+  .auth-hero h2{font-size:30px}
+  .auth .fm input{min-height:40px}
+}

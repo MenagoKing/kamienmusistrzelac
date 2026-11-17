@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DropEventKind, LockedSpecimen } from '../data';
 import { useApp } from '../lib/store';
-import { gpuRatio, light, once, scene } from '../lib/scene';
+import { gpuRatio, isTouch, light, once, scene } from '../lib/scene';
+import { buildRock } from '../lib/rockbuild';
 import { usd } from '../lib/format';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -40,14 +41,24 @@ export function Drops() {
     if (!once(c) || !tiles.current) return;
     const els = [...tiles.current.querySelectorAll<HTMLElement>('.tile')];
     if (!els.length) return;
-    scene().then(({ RK, THREE }) => {
+    scene().then(async ({ RK, THREE }) => {
       const gr = RK.renderer(c, 1.0); gr.setPixelRatio(gpuRatio()); gr.setScissorTest(true); const gc = new THREE.PerspectiveCamera(24, 1, .1, 50); gc.position.set(0, 0, 7.6);
-      const S = els.map(el => { const s = new THREE.Scene(); light(s, gr); const m = RK.rock({ type: el.dataset.rock, seed: +el.dataset.seed!, level: 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 }); m.scale.setScalar(1.05); s.add(m); return { s, m }; });
+      // Rocks built in the worker; tile boxes measured once and on resize (not every frame).
+      const S = await Promise.all(els.map(async el => { const s = new THREE.Scene(); light(s, gr); const m = await buildRock({ type: el.dataset.rock!, seed: +el.dataset.seed!, level: 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 }); m.scale.setScalar(1.05); s.add(m); return { s, m }; }));
+      let boxes: { x: number; y: number; w: number; h: number }[] = [];
+      const measure = () => {
+        const cb = c!.getBoundingClientRect();
+        boxes = els.map(el => { const b = el.getBoundingClientRect(); return { x: b.left - cb.left, y: cb.bottom - b.bottom, w: b.width, h: b.height }; });
+      };
+      measure();
+      new ResizeObserver(measure).observe(tiles.current!);
+      const touch = isTouch(); let n = 0;
       RK.run(c, gr, gc, (t: number) => {
-        const cb = c!.getBoundingClientRect(); gr.setClearColor(0, 0); gr.clear();
-        els.forEach((el, i) => {
-          const b = el.getBoundingClientRect(); const x = b.left - cb.left, y = cb.bottom - b.bottom, w = b.width, h = b.height * .78;
-          gr.setViewport(x, y + b.height * .14, w, h); gr.setScissor(x, y, w, b.height); gc.aspect = w / h; gc.updateProjectionMatrix();
+        if (touch && (n++ & 1)) return; // phones: 30 fps
+        gr.setClearColor(0, 0); gr.clear();
+        boxes.forEach((b, i) => {
+          const h = b.h * .78;
+          gr.setViewport(b.x, b.y + b.h * .14, b.w, h); gr.setScissor(b.x, b.y, b.w, b.h); gc.aspect = b.w / h; gc.updateProjectionMatrix();
           S[i].m.rotation.set(.3, -2.25 + Math.sin(t * .22 + i * 1.7) * .55 + i * .12, .08); gr.render(S[i].s, gc);
         });
       });

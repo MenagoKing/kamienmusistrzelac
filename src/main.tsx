@@ -8,6 +8,7 @@ import './styles/account.css';
 import './styles/v3.css';
 import './styles/pack.css';
 import './styles/mobile.css';
+import './styles/auth.css';
 
 const root = document.getElementById('root')!;
 const fail = () => {

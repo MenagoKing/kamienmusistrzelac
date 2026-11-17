@@ -3,6 +3,7 @@
 // spinning with inertia; viewers off screen are skipped. Uses the design's 3D library (RK) unchanged.
 import type { RenderHint } from '../data';
 import { gpuRatio, isTouch, light, scene } from './scene';
+import { buildRock } from './rockbuild';
 import { planet, planetLight, type PlanetKind } from './planet';
 
 export interface ViewOpts {
@@ -28,6 +29,8 @@ interface View {
   o: Opts;
   rotX: number; rotY: number; vx: number; vy: number;
   visible: boolean; hover: boolean; drag: boolean; dirty: boolean;
+  w: number; h: number; acc: number;
+  ro: ResizeObserver;
   io: IntersectionObserver;
   off: () => void;
 }
@@ -41,6 +44,7 @@ const models = new Map<string, Model>();
 const building = new Set<string>();
 const queue: View[] = [];
 const reduced = typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+const touch = isTouch();
 
 async function boot() {
   if (renderer) return;
@@ -59,26 +63,23 @@ function ensureSize(w: number, h: number) {
   renderer.setSize(W, H, false);
 }
 
-/** Builds one model per frame at most: generating a detailed rock takes a moment. */
+/** Starts building models for visible views; rock geometry is computed in a Web Worker. */
 function buildNext() {
-  const v = queue.find(x => views.has(x) && x.visible && !models.has(x.key));
+  const v = queue.find(x => views.has(x) && x.visible && !models.has(x.key) && !building.has(x.key));
   if (!v) return;
   queue.splice(queue.indexOf(v), 1);
-  if (building.has(v.key)) return;
   building.add(v.key);
   const s = new THREE.Scene();
-  let m: any;
-  if (v.o.model) { planetLight(THREE, s); m = planet(THREE, RK, v.o.model); }
-  else { light(s, renderer); m = RK.rock({ type: v.hint.type, seed: v.hint.seed, level: v.o.level, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: v.o.level === 6 ? .009 : .011 }); }
-  s.add(m);
-  models.set(v.key, { scene: s, mesh: m });
-  building.delete(v.key);
-  views.forEach(x => { if (x.key === v.key) x.dirty = true; });
+  const done = (m: any) => { s.add(m); models.set(v.key, { scene: s, mesh: m }); building.delete(v.key); views.forEach(x => { if (x.key === v.key) x.dirty = true; }); };
+  if (v.o.model) { planetLight(THREE, s); done(planet(THREE, RK, v.o.model)); return; }
+  light(s, renderer);
+  buildRock({ type: v.hint.type, seed: v.hint.seed, level: v.o.level, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: v.o.level === 6 ? .009 : .011 })
+    .then(done, () => building.delete(v.key));
 }
 
 function draw(v: View, m: Model) {
   const dpr = gpuRatio();
-  const cw = Math.max(1, Math.round(v.canvas.clientWidth * dpr)), ch = Math.max(1, Math.round(v.canvas.clientHeight * dpr));
+  const cw = Math.max(1, Math.round(v.w * dpr)), ch = Math.max(1, Math.round(v.h * dpr));
   if (v.canvas.width !== cw || v.canvas.height !== ch) { v.canvas.width = cw; v.canvas.height = ch; }
   ensureSize(cw, ch);
   renderer.setViewport(0, 0, cw, ch); renderer.setScissor(0, 0, cw, ch);
@@ -92,20 +93,13 @@ function draw(v: View, m: Model) {
   v.ctx.drawImage(glCanvas!, 0, H - ch, cw, ch, 0, 0, cw, ch);
 }
 
-let idleBuild = false;
-/** Build models when the browser is idle, so a scroll never stutters on a new rock. */
-function scheduleBuild() {
-  if (idleBuild) return;
-  idleBuild = true;
-  const run = () => { idleBuild = false; buildNext(); };
-  if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 250 }); else setTimeout(run, 16);
-}
-
 function frame(t: number) {
   raf = requestAnimationFrame(frame);
   const dt = Math.min(.05, (t - (last || t)) / 1000); last = t;
-  scheduleBuild();
-  if (fn++ % 12 === 0) views.forEach(v => { // backup for IntersectionObserver
+  buildNext();
+  // Phones: idle turning runs at 30 fps; drags and first draws stay at full rate.
+  const skipIdle = touch && (fn & 1) === 1;
+  if (fn++ % 30 === 0) views.forEach(v => { // backup for IntersectionObserver
     const r = v.canvas.getBoundingClientRect();
     const vis = r.width > 0 && r.bottom > -120 && r.top < innerHeight + 120;
     if (vis !== v.visible) { v.visible = vis; if (vis) v.dirty = true; }
@@ -117,8 +111,10 @@ function frame(t: number) {
     const spinning = Math.abs(v.vy) > .0004 || Math.abs(v.vx) > .0004;
     const idle = !reduced && (v.o.mode === 'live' || v.hover) ? v.o.auto : 0;
     if (!(v.dirty || v.drag || spinning || idle)) return;
+    if (skipIdle && !v.dirty && !v.drag) { v.acc += dt; return; }
+    const step = dt + v.acc; v.acc = 0;
     if (!v.drag) {
-      v.rotY += v.vy + idle * dt; v.rotX += v.vx;
+      v.rotY += v.vy + idle * step; v.rotX += v.vx;
       v.vy *= .93; v.vx *= .9;
       v.rotX += (0 - v.rotX) * (v.o.mode === 'live' ? .02 : .04); // settle back to the design's tilt
     }
@@ -136,10 +132,13 @@ export function attach(canvas: HTMLCanvasElement, hint: RenderHint, opts: ViewOp
   const v: View = {
     canvas, ctx: canvas.getContext('2d')!, key: o.model ? `planet:${o.model}` : `${hint.type}:${hint.seed}:${o.level}`, hint, o,
     rotX: 0, rotY: o.startRot, vx: 0, vy: 0, visible: false, hover: false, drag: false, dirty: true,
+    w: canvas.clientWidth, h: canvas.clientHeight, acc: 0,
+    ro: new ResizeObserver(es => { const r = es[es.length - 1].contentRect; v.w = r.width; v.h = r.height; v.dirty = true; }),
     io: new IntersectionObserver(es => { v.visible = es[es.length - 1].isIntersecting; if (v.visible) v.dirty = true; }, { rootMargin: "120px" }),
     off: () => undefined,
   };
   v.io.observe(canvas);
+  v.ro.observe(canvas);
   let px = 0, py = 0, moved = 0;
   const down = (e: PointerEvent) => { v.drag = true; moved = 0; px = e.clientX; py = e.clientY; v.vx = v.vy = 0; canvas.setPointerCapture(e.pointerId); canvas.classList.add('grab'); };
   const move = (e: PointerEvent) => {
@@ -165,7 +164,7 @@ export function attach(canvas: HTMLCanvasElement, hint: RenderHint, opts: ViewOp
     canvas.removeEventListener('pointerdown', down); canvas.removeEventListener('pointermove', move);
     canvas.removeEventListener('pointerup', up); canvas.removeEventListener('pointercancel', up);
     canvas.removeEventListener('click', click, true); canvas.removeEventListener('pointerenter', enter); canvas.removeEventListener('pointerleave', leave);
-    v.io.disconnect();
+    v.io.disconnect(); v.ro.disconnect();
   };
   views.add(v);
   boot().then(() => { if (!raf && views.size) raf = requestAnimationFrame(frame); }).catch(() => canvas.classList.add('nogl'));

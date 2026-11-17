@@ -34,7 +34,8 @@ export const reducedMotion = () => typeof matchMedia !== 'undefined' && matchMed
 
 /** Lighting shared by every rock (from the design's page script). */
 export function light(scene: any, r: any) {
-  scene.environment = RK.env(r, { top: '#3b2a22', bottom: '#0b0807', panels: [{ c: '#ff8a50', i: 1.15, pos: [6, 0, -6], w: 0.12 }, { c: '#fff0e0', i: 0.75, pos: [-4, 7, 3], w: 0.1 }, { c: '#8fa8d8', i: 0.18, pos: [-6, -1, 5], w: 0.2 }] });
+  // The environment cube is computed on the CPU: make it once per renderer.
+  scene.environment = r.__srEnv ??= RK.env(r, { top: '#3b2a22', bottom: '#0b0807', panels: [{ c: '#ff8a50', i: 1.15, pos: [6, 0, -6], w: 0.12 }, { c: '#fff0e0', i: 0.75, pos: [-4, 7, 3], w: 0.1 }, { c: '#8fa8d8', i: 0.18, pos: [-6, -1, 5], w: 0.2 }] });
   const k = new THREE.DirectionalLight(0xfff1e2, 1.6); k.position.set(-2.5, 6.5, 2.5); scene.add(k);
   const b = new THREE.DirectionalLight(0xff6a33, 3.3); b.position.set(6, 1, -5); scene.add(b);
   const f = new THREE.DirectionalLight(0x8fa8d8, 0.35); f.position.set(-6, -1, 5); scene.add(f);

@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import type { RenderHint } from '../data';
 import { light, scene } from './scene';
+import { buildRock } from './rockbuild';
 
 export interface StillOpts { w: number; h: number; rot?: number; scale?: number }
 
@@ -18,7 +19,7 @@ async function pump() {
   if (busy) return;
   busy = true;
   try {
-    const { RK, THREE } = await scene();
+    const { THREE } = await scene();
     if (!tr) {
       cv = document.createElement('canvas');
       tr = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, preserveDrawingBuffer: true });
@@ -30,10 +31,11 @@ async function pump() {
       if (cache.has(key)) { flush(key); continue; }
       tr.setSize(o.w, o.h, false); tc.aspect = o.w / o.h; tc.updateProjectionMatrix();
       const s = new THREE.Scene(); light(s, tr);
-      const m = RK.rock({ type: p.type, seed: p.seed, level: o.w < 200 ? 4 : 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 });
+      const m = await buildRock({ type: p.type, seed: p.seed, level: o.w < 200 ? 4 : 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 });
+      tr.setSize(o.w, o.h, false); tc.aspect = o.w / o.h; tc.updateProjectionMatrix();
       m.scale.setScalar(o.scale ?? 1.3); m.rotation.set(.32, o.rot ?? -1.6, .08); s.add(m); tr.render(s, tc);
       cache.set(key, cv!.toDataURL());
-      m.geometry.dispose(); m.material.dispose();
+      m.material.dispose(); // geometry is cached and shared
       flush(key);
       await new Promise(r => setTimeout(r, 0)); // keep the page responsive between renders
     }

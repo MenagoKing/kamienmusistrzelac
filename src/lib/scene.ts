@@ -55,3 +55,6 @@ export const isTouch = () => typeof matchMedia !== 'undefined' && matchMedia('(p
 
 /** Pixel ratio for WebGL: sharp on desktops, lighter on phones so scrolling stays smooth. */
 export const gpuRatio = () => Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, isTouch() ? 1.5 : 2);
+
+/** True while a dialog, sheet or menu covers the page (they set html.locked): background 3D can pause. */
+export const overlayOpen = () => typeof document !== 'undefined' && document.documentElement.classList.contains('locked');

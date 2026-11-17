@@ -2,9 +2,10 @@
 // canvas (so a page full of rocks never runs out of WebGL contexts). Drag to turn a rock, it keeps
 // spinning with inertia; viewers off screen are skipped. Uses the design's 3D library (RK) unchanged.
 import type { RenderHint } from '../data';
-import { gpuRatio, isTouch, light, scene } from './scene';
+import { gpuRatio, isTouch, light, overlayOpen, scene } from './scene';
 import { buildRock } from './rockbuild';
-import { planet, planetLight, type PlanetKind } from './planet';
+import { bakeRock, disposeBaked } from './bake';
+import { bakedPlanet, planetLight, type PlanetKind } from './planet';
 
 export interface ViewOpts {
   /** 'live' keeps turning; 'hover' draws once and turns while hovered or dragged. */
@@ -29,7 +30,7 @@ interface View {
   o: Opts;
   rotX: number; rotY: number; vx: number; vy: number;
   visible: boolean; hover: boolean; drag: boolean; dirty: boolean;
-  w: number; h: number; acc: number;
+  w: number; h: number; acc: number; top: boolean;
   ro: ResizeObserver;
   io: IntersectionObserver;
   off: () => void;
@@ -71,13 +72,26 @@ function buildNext() {
   building.add(v.key);
   const s = new THREE.Scene();
   const done = (m: any) => { s.add(m); models.set(v.key, { scene: s, mesh: m }); building.delete(v.key); views.forEach(x => { if (x.key === v.key) x.dirty = true; }); };
-  if (v.o.model) { planetLight(THREE, s); done(planet(THREE, RK, v.o.model)); return; }
+  if (v.o.model) { planetLight(THREE, s); bakedPlanet(THREE, RK, renderer, v.o.model, touch ? 384 : 512).then(done, () => building.delete(v.key)); return; }
   light(s, renderer);
+  const size = v.o.mode === 'live' ? (touch ? 384 : 512) : (touch ? 192 : 256);
   buildRock({ type: v.hint.type, seed: v.hint.seed, level: v.o.level, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: v.o.level === 6 ? .009 : .011 })
-    .then(done, () => building.delete(v.key));
+    .then(m => { done(m); return bakeRock(THREE, renderer, m, size).then(() => views.forEach(x => { if (x.key === v.key) x.dirty = true; })); })
+    .catch(() => building.delete(v.key));
+  evict();
+}
+
+/** Keeps GPU memory in check: frees the least recently drawn rocks that are off screen. */
+const lastUse = new Map<string, number>();
+function evict() {
+  if (models.size <= 18) return;
+  const onScreen = new Set([...views].filter(x => x.visible).map(x => x.key));
+  const old = [...models.keys()].filter(k => !onScreen.has(k)).sort((a, b) => (lastUse.get(a) ?? 0) - (lastUse.get(b) ?? 0));
+  for (const k of old.slice(0, models.size - 18)) { const m = models.get(k)!; if (!k.startsWith('planet:')) disposeBaked(m.mesh); models.delete(k); }
 }
 
 function draw(v: View, m: Model) {
+  lastUse.set(v.key, performance.now());
   const dpr = gpuRatio();
   const cw = Math.max(1, Math.round(v.w * dpr)), ch = Math.max(1, Math.round(v.h * dpr));
   if (v.canvas.width !== cw || v.canvas.height !== ch) { v.canvas.width = cw; v.canvas.height = ch; }
@@ -97,22 +111,21 @@ function frame(t: number) {
   raf = requestAnimationFrame(frame);
   const dt = Math.min(.05, (t - (last || t)) / 1000); last = t;
   buildNext();
-  // Phones: idle turning runs at 30 fps; drags and first draws stay at full rate.
-  const skipIdle = touch && (fn & 1) === 1;
   if (fn++ % 30 === 0) views.forEach(v => { // backup for IntersectionObserver
     const r = v.canvas.getBoundingClientRect();
     const vis = r.width > 0 && r.bottom > -120 && r.top < innerHeight + 120;
     if (vis !== v.visible) { v.visible = vis; if (vis) v.dirty = true; }
   });
+  const covered = overlayOpen();
   views.forEach(v => {
     if (!v.visible) return;
+    if (covered && !v.top) return; // only what is inside the open dialog keeps drawing
     const m = models.get(v.key);
     if (!m) { if (!queue.includes(v)) queue.push(v); return; }
     const spinning = Math.abs(v.vy) > .0004 || Math.abs(v.vx) > .0004;
     const idle = !reduced && (v.o.mode === 'live' || v.hover) ? v.o.auto : 0;
     if (!(v.dirty || v.drag || spinning || idle)) return;
-    if (skipIdle && !v.dirty && !v.drag) { v.acc += dt; return; }
-    const step = dt + v.acc; v.acc = 0;
+    const step = dt;
     if (!v.drag) {
       v.rotY += v.vy + idle * step; v.rotX += v.vx;
       v.vy *= .93; v.vx *= .9;
@@ -132,7 +145,7 @@ export function attach(canvas: HTMLCanvasElement, hint: RenderHint, opts: ViewOp
   const v: View = {
     canvas, ctx: canvas.getContext('2d')!, key: o.model ? `planet:${o.model}` : `${hint.type}:${hint.seed}:${o.level}`, hint, o,
     rotX: 0, rotY: o.startRot, vx: 0, vy: 0, visible: false, hover: false, drag: false, dirty: true,
-    w: canvas.clientWidth, h: canvas.clientHeight, acc: 0,
+    w: canvas.clientWidth, h: canvas.clientHeight, acc: 0, top: !!canvas.closest('.ov,.opn2,.auth,.mnav'),
     ro: new ResizeObserver(es => { const r = es[es.length - 1].contentRect; v.w = r.width; v.h = r.height; v.dirty = true; }),
     io: new IntersectionObserver(es => { v.visible = es[es.length - 1].isIntersecting; if (v.visible) v.dirty = true; }, { rootMargin: "120px" }),
     off: () => undefined,
@@ -146,7 +159,7 @@ export function attach(canvas: HTMLCanvasElement, hint: RenderHint, opts: ViewOp
     const dx = e.clientX - px, dy = e.clientY - py; px = e.clientX; py = e.clientY; moved += Math.abs(dx) + Math.abs(dy);
     v.vy = dx * .012; v.vx = dy * .006;
     v.rotY += v.vy; v.rotX = Math.max(-.7, Math.min(.9, v.rotX + v.vx));
-    const m = models.get(v.key); if (m) draw(v, m);
+    v.dirty = true; // drawn once on the next frame, however many move events arrive
   };
   const up = (e: PointerEvent) => { v.drag = false; canvas.classList.remove('grab'); try { canvas.releasePointerCapture(e.pointerId); } catch { /* */ } };
   // A drag is not a click: keep the card under the rock from opening.

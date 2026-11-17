@@ -110,3 +110,56 @@ export function planetLight(THREE: any, scene: any) {
   const fill = new THREE.DirectionalLight(0x6f8fbf, 0.18); fill.position.set(5, -1, 2); scene.add(fill);
   scene.add(new THREE.AmbientLight(0x1a2233, 0.22));
 }
+
+/* ---------- baked planets: the shaders above run once into cube maps, then turn cheaply ---------- */
+import { renderCube } from './bake';
+
+const CLOUD = 'float cloudA(vec3 p){vec3 q=p+vec3(fbm(p*2.+1.),fbm(p*2.+4.),0.)*.4;float c=fbm(q*3.2+vec3(0.,2.,0.));float band=1.-abs(p.y)*.35;return smoothstep(.06,.42,c*band)*.85;}';
+const BAKE_VS = 'varying vec3 vObj;void main(){vObj=normalize(position);gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}';
+
+function sampled(THREE: any, tA: any, tB: any) {
+  const m = new THREE.MeshStandardMaterial({ roughness: .8, metalness: 0 });
+  m.onBeforeCompile = (sh: any) => {
+    sh.uniforms.tA = { value: tA }; sh.uniforms.tB = { value: tB };
+    sh.vertexShader = 'varying vec3 vObj;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj=normalize(position);');
+    sh.fragmentShader = 'varying vec3 vObj;uniform samplerCube tA;uniform samplerCube tB;\n' + sh.fragmentShader
+      .replace('#include <color_fragment>', 'vec4 pA=textureCube(tA,vObj);vec4 pB=textureCube(tB,vObj);diffuseColor.rgb=pA.rgb*pA.rgb;')
+      .replace('#include <roughnessmap_fragment>', 'float roughnessFactor=pA.a;')
+      .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
+{float h=pB.r*.035;vec3 sp=-vViewPosition;vec3 sx=dFdx(sp),sy=dFdy(sp);vec3 qA=cross(sy,normal),qB=cross(normal,sx);float det=dot(sx,qA);vec2 dH=vec2(dFdx(h),dFdy(h));normal=normalize(abs(det)*normal-sign(det)*(dH.x*qA+dH.y*qB));}`);
+  };
+  m.customProgramCacheKey = () => 'sr-baked-planet';
+  return m;
+}
+
+/** Earth and the Moon baked once (two cube maps); Mars stays the design's own material. */
+export async function bakedPlanet(THREE: any, RK: any, renderer: any, kind: PlanetKind, size = 512) {
+  if (kind === 'mars') return planet(THREE, RK, 'mars');
+  const fn = kind === 'earth' ? 'earthCol' : 'moonCol';
+  const body = kind === 'earth' ? EARTH : MOON;
+  const a = new THREE.ShaderMaterial({ vertexShader: BAKE_VS, side: THREE.DoubleSide,
+    fragmentShader: NOISE + body + `varying vec3 vObj;void main(){float r;float e;vec3 c=${fn}(vObj,r,e);gl_FragColor=vec4(sqrt(max(c,0.)),r);}` });
+  const b = new THREE.ShaderMaterial({ vertexShader: BAKE_VS, side: THREE.DoubleSide,
+    fragmentShader: NOISE + body + (kind === 'earth' ? CLOUD : 'float cloudA(vec3 p){return 0.;}') + `varying vec3 vObj;void main(){float r;float e;${fn}(vObj,r,e);gl_FragColor=vec4(e,cloudA(vObj),0.,1.);}` });
+  const rtA = await renderCube(THREE, renderer, a, size, false);
+  const rtB = await renderCube(THREE, renderer, b, size, true);
+  a.dispose(); b.dispose();
+
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(1, 128, 96), sampled(THREE, rtA.texture, rtB.texture)));
+  if (kind === 'earth') {
+    const cm = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, metalness: 0, transparent: true, depthWrite: false });
+    cm.onBeforeCompile = (sh: any) => {
+      sh.uniforms.tB = { value: rtB.texture };
+      sh.vertexShader = 'varying vec3 vObj;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvObj=normalize(position);');
+      sh.fragmentShader = 'varying vec3 vObj;uniform samplerCube tB;\n' + sh.fragmentShader.replace('#include <color_fragment>', '#include <color_fragment>\ndiffuseColor.a*=textureCube(tB,vObj).g;');
+    };
+    cm.customProgramCacheKey = () => 'sr-baked-clouds';
+    const c = new THREE.Mesh(new THREE.SphereGeometry(1.018, 96, 72), cm);
+    c.onBeforeRender = () => { c.rotation.y = performance.now() * 0.000012; };
+    g.add(c);
+    g.add(RK.atmosphere('#6ab8ff', 1.9));
+  }
+  g.userData.baked = { rtA, rtB };
+  return g;
+}

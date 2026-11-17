@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DropEventKind, LockedSpecimen } from '../data';
 import { useApp } from '../lib/store';
-import { gpuRatio, isTouch, light, once, scene } from '../lib/scene';
+import { gpuRatio, light, once, overlayOpen, scene } from '../lib/scene';
 import { buildRock } from '../lib/rockbuild';
+import { bakeRock } from '../lib/bake';
 import { usd } from '../lib/format';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -44,7 +45,7 @@ export function Drops() {
     scene().then(async ({ RK, THREE }) => {
       const gr = RK.renderer(c, 1.0); gr.setPixelRatio(gpuRatio()); gr.setScissorTest(true); const gc = new THREE.PerspectiveCamera(24, 1, .1, 50); gc.position.set(0, 0, 7.6);
       // Rocks built in the worker; tile boxes measured once and on resize (not every frame).
-      const S = await Promise.all(els.map(async el => { const s = new THREE.Scene(); light(s, gr); const m = await buildRock({ type: el.dataset.rock!, seed: +el.dataset.seed!, level: 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 }); m.scale.setScalar(1.05); s.add(m); return { s, m }; }));
+      const S = await Promise.all(els.map(async el => { const s = new THREE.Scene(); light(s, gr); const m = await buildRock({ type: el.dataset.rock!, seed: +el.dataset.seed!, level: 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 }); m.scale.setScalar(1.05); s.add(m); bakeRock(THREE, gr, m, 256); return { s, m }; }));
       let boxes: { x: number; y: number; w: number; h: number }[] = [];
       const measure = () => {
         const cb = c!.getBoundingClientRect();
@@ -52,9 +53,8 @@ export function Drops() {
       };
       measure();
       new ResizeObserver(measure).observe(tiles.current!);
-      const touch = isTouch(); let n = 0;
       RK.run(c, gr, gc, (t: number) => {
-        if (touch && (n++ & 1)) return; // phones: 30 fps
+        if (overlayOpen()) return;
         gr.setClearColor(0, 0); gr.clear();
         boxes.forEach((b, i) => {
           const h = b.h * .78;

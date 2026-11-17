@@ -3,6 +3,7 @@
 // spinning with inertia; viewers off screen are skipped. Uses the design's 3D library (RK) unchanged.
 import type { RenderHint } from '../data';
 import { light, scene } from './scene';
+import { planet, planetLight, type PlanetKind } from './planet';
 
 export interface ViewOpts {
   /** 'live' keeps turning; 'hover' draws once and turns while hovered or dragged. */
@@ -13,14 +14,18 @@ export interface ViewOpts {
   level?: 5 | 6;
   scale?: number;
   startRot?: number;
+  /** Draw a planet instead of a specimen (pack covers). */
+  model?: PlanetKind;
 }
+
+type Opts = Required<Omit<ViewOpts, 'model'>> & { model?: PlanetKind };
 
 interface View {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   key: string;
   hint: RenderHint;
-  o: Required<ViewOpts>;
+  o: Opts;
   rotX: number; rotY: number; vx: number; vy: number;
   visible: boolean; hover: boolean; drag: boolean; dirty: boolean;
   io: IntersectionObserver;
@@ -61,8 +66,10 @@ function buildNext() {
   queue.splice(queue.indexOf(v), 1);
   if (building.has(v.key)) return;
   building.add(v.key);
-  const s = new THREE.Scene(); light(s, renderer);
-  const m = RK.rock({ type: v.hint.type, seed: v.hint.seed, level: v.o.level, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: v.o.level === 6 ? .009 : .011 });
+  const s = new THREE.Scene();
+  let m: any;
+  if (v.o.model) { planetLight(THREE, s); m = planet(THREE, RK, v.o.model); }
+  else { light(s, renderer); m = RK.rock({ type: v.hint.type, seed: v.hint.seed, level: v.o.level, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: v.o.level === 6 ? .009 : .011 }); }
   s.add(m);
   models.set(v.key, { scene: s, mesh: m });
   building.delete(v.key);
@@ -78,7 +85,8 @@ function draw(v: View, m: Model) {
   renderer.setClearColor(0, 0); renderer.clear();
   camera.aspect = cw / ch; camera.updateProjectionMatrix();
   m.mesh.scale.setScalar(v.o.scale);
-  m.mesh.rotation.set(.3 + v.rotX, v.rotY, .08);
+  if (v.o.model) m.mesh.rotation.set(.16 + v.rotX, v.rotY, .41); // axial tilt
+  else m.mesh.rotation.set(.3 + v.rotX, v.rotY, .08);
   renderer.render(m.scene, camera);
   v.ctx.clearRect(0, 0, cw, ch);
   v.ctx.drawImage(glCanvas!, 0, H - ch, cw, ch, 0, 0, cw, ch);
@@ -113,9 +121,9 @@ function frame(t: number) {
 
 export function attach(canvas: HTMLCanvasElement, hint: RenderHint, opts: ViewOpts) {
   const given = Object.fromEntries(Object.entries(opts).filter(([, x]) => x !== undefined)) as ViewOpts; // undefined must not erase defaults
-  const o: Required<ViewOpts> = { auto: opts.mode === 'live' ? .35 : .9, level: 6, scale: 1.3, startRot: -1.6, ...given };
+  const o: Opts = { auto: opts.mode === 'live' ? .35 : .9, level: 6, scale: 1.3, startRot: -1.6, ...given };
   const v: View = {
-    canvas, ctx: canvas.getContext('2d')!, key: `${hint.type}:${hint.seed}:${o.level}`, hint, o,
+    canvas, ctx: canvas.getContext('2d')!, key: o.model ? `planet:${o.model}` : `${hint.type}:${hint.seed}:${o.level}`, hint, o,
     rotX: 0, rotY: o.startRot, vx: 0, vy: 0, visible: false, hover: false, drag: false, dirty: true,
     io: new IntersectionObserver(es => { v.visible = es[es.length - 1].isIntersecting; if (v.visible) v.dirty = true; }, { rootMargin: "120px" }),
     off: () => undefined,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { buySpecimen, openPack, sellBack, type Currency, type Listing, type PackReveal, type Series, type Specimen, type TxResult } from '../data';
 import { api } from '../lib/api';
 import { useApp } from '../lib/store';
@@ -10,6 +10,7 @@ import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
 import { Media } from './Media';
 import { RockView } from './RockView';
+import type { PlanetKind } from '../lib/planet';
 
 function PayWith({ value, onChange, price }: { value: Currency; onChange: (c: Currency) => void; price: number }) {
   const { data } = useApp();
@@ -196,14 +197,9 @@ export function PackDialog({ series }: { series: Series }) {
   return (
     <Overlay wide label={`Open a pack from ${series.name}`} title={<div className="sec mono"><span>The packs</span><span>{series.name} · {TIER_NAME[series.tier]}</span></div>}>
       <div className="pk2">
-        <div className="pk2-pack" aria-hidden="true">
-          <div className="pack-card">
-            <span className="mono">{series.name}</span>
-            <i className="pack-sym" />
-            <b>One real<br />meteorite</b>
-            <span className="mono">{TIER_NAME[series.tier]} pack · sealed</span>
-          </div>
-          <p className="mono">{left} of {series.size} still sealed</p>
+        <div className="pk2-pack">
+          <PackCover series={series} />
+          <p className="mono">{left} of {series.size} still sealed · drag the planet</p>
         </div>
         <div className="pk2-bd">
           <h3 className="dlg-h">One pack. One real specimen.</h3>
@@ -238,32 +234,51 @@ export function PackDialog({ series }: { series: Series }) {
 
 const PIECE: Record<string, string> = { martian: 'a piece of Mars', lunar: 'a piece of the Moon', pallasite: 'a piece of a planet’s core', iron: 'a piece of an asteroid’s core', stone: 'a piece of another world' };
 
-/** Full screen: a meteor falls and hits the ground, the drawn specimen rises from the crater and floats. */
+const TIER_PLANET: Record<Series['tier'], PlanetKind> = { earth: 'earth', orbit: 'moon', mars: 'mars', launch: 'earth' };
+const TIER_LINE: Record<Series['tier'], string> = { earth: 'Chondrite and iron fragments', orbit: 'Pallasites and rare classes', mars: 'Lunar and Martian chances', launch: 'Limited launch drop pool' };
+
+/** The pack itself: a sealed card with its planet in 3D (Earth for Earth packs, the Moon, Mars). */
+export function PackCover({ series, still }: { series: Series; still?: boolean }) {
+  const kind = TIER_PLANET[series.tier];
+  return (
+    <div className={'pcov tier-' + series.tier}>
+      <div className="pcov-in">
+        <div className="pcov-top mono"><span>Space Rocks</span><span>{series.name}</span></div>
+        <div className="pcov-planet">
+          <i className="pcov-orbit" aria-hidden="true" />
+          <RockView hint={{ type: 'stone', seed: 1 }} model={kind} mode="live" auto={still ? 0.12 : 0.22} scale={1.05} label={`${kind === 'earth' ? 'Earth' : kind === 'moon' ? 'The Moon' : 'Mars'} in 3D. Drag to turn it.`} />
+        </div>
+        <div className="pcov-bt">
+          <b>{TIER_NAME[series.tier]} pack</b>
+          <span className="mono">{TIER_LINE[series.tier]}</span>
+          <span className="pcov-seal mono">1 real meteorite · sealed</span>
+        </div>
+      </div>
+      <i className="pcov-sheen" aria-hidden="true" />
+    </div>
+  );
+}
+
+/** Full screen: the pack glows, opens along a seam of light, and the drawn specimen appears. */
 export function PackOpening({ series, currency, seed }: { series: Series; currency: Currency; seed: string }) {
   const { data, close, open, refresh } = useApp();
-  const [phase, setPhase] = useState<'fall' | 'impact' | 'rise' | 'reveal'>('fall');
+  const [phase, setPhase] = useState<'charge' | 'open' | 'reveal'>('charge');
   const [res, setRes] = useState<{ reveal: PackReveal; payment: TxResult } | null>(null);
   const [err, setErr] = useState('');
+  const [minTime, setMinTime] = useState(false);
   const left = series.remaining.floor + series.remaining.par + series.remaining.hit;
 
   useEffect(() => {
     let alive = true;
-    const t0 = Date.now();
     openPack(series.id, currency, seed).then(r => { if (alive) { setRes(r); refresh(); } }, e => alive && setErr(e.message));
-    const a = setTimeout(() => alive && setPhase('impact'), 1250);
-    return () => { alive = false; clearTimeout(a); void t0; };
+    const t = setTimeout(() => alive && setMinTime(true), 1300);
+    return () => { alive = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   useEffect(() => {
-    if (phase !== 'impact' || !res) return;
-    const t = setTimeout(() => setPhase('rise'), 900);
-    return () => clearTimeout(t);
-  }, [phase, res]);
-  useEffect(() => {
-    if (phase !== 'rise') return;
-    const t = setTimeout(() => setPhase('reveal'), 1500);
-    return () => clearTimeout(t);
-  }, [phase]);
+    if (phase === 'charge' && res && minTime) setPhase('open');
+    if (phase === 'open') { const t = setTimeout(() => setPhase('reveal'), 750); return () => clearTimeout(t); }
+  }, [phase, res, minTime]);
   useEffect(() => {
     const k = (e: KeyboardEvent) => { if (e.key === 'Escape' && (phase === 'reveal' || err)) close(); };
     addEventListener('keydown', k);
@@ -273,36 +288,34 @@ export function PackOpening({ series, currency, seed }: { series: Series; curren
 
   const band = res?.reveal.band ?? 'floor';
   const sp = res?.reveal.specimen;
-  const stars = useMemo(() => Array.from({ length: 70 }, (_, i) => ({ l: (i * 37.7) % 100, t: (i * 53.3) % 62, s: i % 9 === 0 ? 2 : 1, d: (i % 7) * .6 })), []);
 
   return (
-    <div className={`opn ph-${phase} band-${band}`} role="dialog" aria-modal="true" aria-label="Opening your pack">
-      <div className="opn-sky">{stars.map((s, i) => <i key={i} style={{ left: s.l + '%', top: s.t + '%', width: s.s, height: s.s, animationDelay: s.d + 's' }} />)}</div>
-      <div className="opn-meteor" aria-hidden="true"><i /></div>
-      <div className="opn-ground" aria-hidden="true">
-        <svg viewBox="0 0 1440 260" preserveAspectRatio="none"><path d="M0 120 C200 100 340 128 520 112 C660 100 760 118 900 108 C1080 96 1240 118 1440 104 L1440 260 L0 260 Z" fill="#120c09" /><path d="M0 120 C200 100 340 128 520 112 C660 100 760 118 900 108 C1080 96 1240 118 1440 104" stroke="rgba(240,138,93,.35)" fill="none" /></svg>
-        <span className="crater" />
-        <span className="shock" /><span className="shock s2" />
-        {Array.from({ length: 16 }, (_, i) => <span key={i} className="debris" style={{ ['--a' as any]: `${-160 + i * 21}deg`, ['--d' as any]: `${70 + (i * 37) % 90}px`, animationDelay: `${(i % 4) * 40}ms` }} />)}
-      </div>
-      <div className="opn-flash" aria-hidden="true" />
+    <div className={`opn2 ph-${phase} band-${band}`} role="dialog" aria-modal="true" aria-label="Opening your pack">
+      <div className="opn2-glow" aria-hidden="true" />
 
-      {sp && (phase === 'rise' || phase === 'reveal') && (
-        <div className="opn-rock">
-          <i className="aura" aria-hidden="true" />
-          <div className="float"><RockView hint={sp.render} mode="live" auto={0.45} scale={1.45} label={`${sp.name} in 3D. Drag to turn it.`} /></div>
-          <span className="opn-drag mono" aria-hidden="true">Drag to turn it</span>
+      {phase !== 'reveal' && !err && (
+        <div className="opn2-pack" aria-hidden="true">
+          <div className="half top"><PackCover series={series} still /></div>
+          <div className="half bot"><PackCover series={series} still /></div>
+          <i className="seam" />
+        </div>
+      )}
+      {phase !== 'reveal' && !err && <p className="opn2-status mono" aria-live="polite">{phase === 'charge' ? `Opening one of ${left} sealed packs…` : 'Here it is'}</p>}
+
+      {sp && phase !== 'charge' && (
+        <div className="opn2-rock">
+          <i className="halo" aria-hidden="true" />
+          <RockView hint={sp.render} mode="live" auto={0.4} scale={1.42} label={`${sp.name} in 3D. Drag to turn it.`} />
+          <span className="opn2-drag mono" aria-hidden="true">Drag to turn it</span>
         </div>
       )}
 
-      {phase !== 'reveal' && !err && <p className="opn-status mono" aria-live="polite">{phase === 'fall' ? `${series.name} · drawing one of ${left} sealed packs` : phase === 'impact' ? (res ? 'Impact' : 'Confirming the draw…') : 'Rising from the crater…'}</p>}
-
       {err && (
-        <div className="opn-panel in"><h3>The pack did not open.</h3><p className="dlg-p">{err}</p><div className="acts"><button className="btn" type="button" onClick={close}>Back</button></div></div>
+        <div className="opn2-panel solo"><h3>The pack did not open.</h3><p className="dlg-p">{err}</p><div className="acts"><button className="btn" type="button" onClick={close}>Back</button></div></div>
       )}
 
       {res && sp && phase === 'reveal' && (
-        <div className="opn-panel">
+        <div className="opn2-panel">
           <span className={'chip' + (band !== 'hit' ? ' ' + band : '')}>{band.toUpperCase()} · {multiple(res.reveal.vault_value_usd, res.reveal.pack_price_usd)}×</span>
           <h3>{sp.name}</h3>
           <div className="cl mono">{sp.class} · {mass(sp.mass_g)} · {sp.id}</div>

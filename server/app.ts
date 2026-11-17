@@ -15,7 +15,7 @@ import { adminListings, buyListing, cancelListing, listForSale, listingsOf } fro
 import { publicListings } from './store.ts';
 import { chainAirdrop, chainStatus, drain, migrateSimulatedMints, nftOwnerOf, queueTransfer, retryFailed, startWorker } from './nft.ts';
 import { googleLogin } from './google.ts';
-import { nftJson, nftSvg } from './nftmeta.ts';
+import { nftJson, nftSvg, saveShareImage, sharePage } from './nftmeta.ts';
 
 ensureSeeded();
 migrateSimulatedMints();
@@ -73,6 +73,7 @@ on('POST', '/api/auth/register', ({ req, res, body }) => register(req, res, body
 on('POST', '/api/auth/login', ({ req, res, body }) => login(req, res, body));
 on('POST', '/api/auth/google', ({ req, res, body }) => googleLogin(req, res, body));
 on('GET', '/api/nft/:id', ({ req, params }) => nftJson(req, params[0]));
+on('POST', '/api/share-image', ({ req, body }) => { requireWallet(req); return saveShareImage(String(body?.specimen_id ?? ''), body?.data); });
 on('POST', '/api/specimens/:id/withdraw', ({ req, params }) => {
   const me = requireWallet(req);
   const s = specimenRow(params[0]) ?? fail(404, 'Specimen not found');
@@ -206,6 +207,12 @@ function serveUpload(res: ServerResponse, pathname: string) {
 export async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', 'http://local');
   if (url.pathname.startsWith('/uploads/')) { serveUpload(res, url.pathname); return true; }
+  if (/^\/s\/[\w-]+$/.test(url.pathname)) {
+    const html = sharePage(req, url.pathname.slice(3));
+    res.writeHead(html ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'public, max-age=300' });
+    res.end(html ?? 'Not found');
+    return true;
+  }
   if (/^\/api\/nft\/[\w-]+\.svg$/.test(url.pathname)) {
     try { const svg = nftSvg(url.pathname.split('/').pop()!); res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' }); res.end(svg); } catch { res.writeHead(404); res.end(); }
     return true;
@@ -217,7 +224,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       // CSRF: state-changing calls must be JSON from our own pages (cookies are SameSite=Strict too).
       if (!String(req.headers['content-type'] ?? '').includes('application/json')) fail(415, 'Send JSON');
     }
-    const body = method === 'GET' ? {} : await readBody(req, url.pathname === '/api/admin/upload' ? 12 * 1024 * 1024 : 256 * 1024);
+    const body = method === 'GET' ? {} : await readBody(req, url.pathname === '/api/admin/upload' ? 12 * 1024 * 1024 : url.pathname === '/api/share-image' ? 4 * 1024 * 1024 : 256 * 1024);
     let matched = false;
     for (const r of routes) {
       const m = r.re.exec(url.pathname);

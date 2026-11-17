@@ -9,7 +9,7 @@ function api(): Plugin {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url ?? '/';
         if (/^\/admin(\/|$|\?|#)/.test(url) && !url.includes('.')) req.url = '/admin.html';
-        if (!url.startsWith('/api/') && !url.startsWith('/uploads/')) return next();
+        if (!url.startsWith('/api/') && !url.startsWith('/uploads/') && !/^\/s\/[\w-]+$/.test(url)) return next();
         try {
           const mod = await server.ssrLoadModule('/server/app.ts');
           if (!(await mod.handle(req, res))) next();

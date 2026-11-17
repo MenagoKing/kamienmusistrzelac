@@ -81,7 +81,10 @@ const PIECE: Record<string, string> = { martian: 'I pulled a piece of Mars', lun
 export function ShareDialog({ reveal }: { reveal: PackReveal }) {
   const sp = reveal.specimen;
   const cv = useRef<HTMLCanvasElement>(null);
+  const { me, toast } = useApp();
   const [url, setUrl] = useState('');
+  const [blob, setBlob] = useState<Blob | null>(null);
+  const [note, setNote] = useState('');
   const line = PIECE[sp.render.type];
 
   useEffect(() => {
@@ -110,21 +113,47 @@ export function ShareDialog({ reveal }: { reveal: PackReveal }) {
       x.fillText(line + '.', 66, 520, 620);
       x.fillStyle = '#A39484'; x.font = '400 18px "IBM Plex Mono", monospace';
       x.fillText('CERTIFIED · VAULTED · MINTED ON SOLANA', 70, 572);
-      setUrl(c.toDataURL('image/png'));
+      const data = c.toDataURL('image/png');
+      setUrl(data);
+      c.toBlob(b => alive && setBlob(b), 'image/png');
+      // Store the card so the share link shows this picture on X (link preview).
+      if (me) api('POST', '/api/share-image', { specimen_id: sp.id, data }).catch(() => undefined);
     })();
     return () => { alive = false; };
-  }, [sp, reveal.band, line]);
+  }, [sp, reveal.band, line, me]);
 
   const text = `${line}: ${sp.name}, ${sp.class}, ${mass(sp.mass_g)}. Real, certified, vaulted.`;
-  const site = typeof location !== 'undefined' ? location.origin : '';
+  const shareUrl = typeof location !== 'undefined' ? `${location.origin}/s/${sp.id}` : '';
+  const fileName = `space-rocks-${sp.id}.png`;
+  const file = () => (blob ? new File([blob], fileName, { type: 'image/png' }) : null);
+
+  const copyImage = async () => {
+    if (!blob || !('ClipboardItem' in window) || !navigator.clipboard?.write) return false;
+    try { await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]); return true; } catch { return false; }
+  };
+
+  /** X's post link only takes text, so the picture travels by the share sheet (phones) or the clipboard (computers). */
+  const post = async () => {
+    const f = file();
+    if (f && matchMedia('(pointer: coarse)').matches && navigator.canShare?.({ files: [f] })) {
+      try { await navigator.share({ files: [f], text: `${text} ${shareUrl}` }); return; } catch (e: any) { if (e?.name === 'AbortError') return; }
+    }
+    const copied = await copyImage();
+    window.open(`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(shareUrl)}`, '_blank', 'noopener');
+    const msg = copied ? 'The picture is copied. In the X post press Ctrl+V (⌘V on a Mac) to attach it.' : 'Download the card and attach it to your post.';
+    setNote(msg);
+    if (copied) toast('Picture copied: paste it into the post');
+  };
+
   return (
     <Overlay label="Share your pull" wide title={<div className="sec mono"><span>Share</span><span>{sp.id}</span></div>}>
       <canvas ref={cv} className="sharecv" aria-label={`Share card: ${text}`} />
       <div className="acts">
-        <a className="btn" href={`https://x.com/intent/post?text=${encodeURIComponent(text)}&url=${encodeURIComponent(site)}`} target="_blank" rel="noreferrer">Post on X</a>
-        <a className={'btn line' + (url ? '' : ' dis')} href={url || undefined} download={`space-rocks-${sp.id}.png`}>Download card</a>
+        <button type="button" className="btn" onClick={post} disabled={!blob}>Post on X with the picture</button>
+        <button type="button" className="btn line" disabled={!blob} onClick={async () => { const ok = await copyImage(); toast(ok ? 'Picture copied' : 'Your browser cannot copy images: use Download', ok ? 'ok' : 'err'); }}>Copy picture</button>
+        <a className={'btn line' + (url ? '' : ' dis')} href={url || undefined} download={fileName}>Download card</a>
       </div>
-      <p className="fine">Download the card and attach it to your post.</p>
+      <p className={note ? 'ok' : 'fine'} role="status">{note || 'On a phone the picture is attached for you. On a computer it is copied: paste it into the post with Ctrl+V. The link in the post also shows the card once the site is online.'}</p>
     </Overlay>
   );
 }

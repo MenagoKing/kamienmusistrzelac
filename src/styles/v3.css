@@ -72,7 +72,6 @@
 .pk2{display:grid;grid-template-columns:.8fr 1.2fr;gap:34px;align-items:start}
 .pk2-pack{position:sticky;top:0;display:grid;justify-items:center;gap:14px;padding:14px 0}
 .pk2-pack>p{color:var(--mute);font-size:11px}
-  background:linear-gradient(160deg,#2a1a12 0%,#15100D 45%,#3a1c0e 100%);border:1px solid rgba(240,138,93,.35);box-shadow:0 30px 80px rgba(0,0,0,.6),inset 0 0 60px rgba(240,138,93,.08);animation:packfloat 5s ease-in-out infinite}
 .odds2{display:grid;gap:8px;margin:6px 0 14px}
 .o2{position:relative;display:grid;grid-template-columns:96px minmax(0,1fr) auto;gap:14px;align-items:center;padding:14px 16px;border:1px solid var(--line);border-radius:14px;overflow:hidden}
 .o2 u{position:absolute;left:0;bottom:0;height:3px;text-decoration:none}

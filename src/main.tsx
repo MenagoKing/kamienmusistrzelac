@@ -1,11 +1,14 @@
 import { createRoot, hydrateRoot } from 'react-dom/client';
 import { App } from './App';
-import { getPageData } from './data';
+import { embeddedPageData, getPageData } from './data';
 import './styles/site.css';
+import './styles/app.css';
 
 const root = document.getElementById('root')!;
-getPageData().then(data => {
-  // The build prerenders the page into #root (scripts/prerender.mjs); hydrate it. `vite dev` renders fresh.
-  if (root.firstElementChild) hydrateRoot(root, <App data={data} />);
-  else createRoot(root).render(<App data={data} />);
+// Production renders the page on the server with the data embedded (#sr-data): hydrate it.
+// `vite dev` renders fresh from the API.
+const embedded = embeddedPageData();
+if (embedded && root.firstElementChild) hydrateRoot(root, <App data={embedded} />);
+else getPageData().then(data => createRoot(root).render(<App data={data} />)).catch(() => {
+  root.innerHTML = '<p style="padding:40px;font-family:system-ui;color:#EFE6DA">The vault is not reachable right now. Refresh in a moment.</p>';
 });

@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import { subscribeSeries, type Band, type Rules, type Series, type UpcomingSeries } from '../data';
-import { isStill, reducedMotion } from '../lib/scene';
-import { pct } from '../lib/format';
+import { subscribeSeries, type Band, type Rules, type Series } from '../data';
+import { useApp } from '../lib/store';
+import { isStill } from '../lib/scene';
+import { pct, usd } from '../lib/format';
 
 const COL: Record<Band, string> = { floor: '#7D7166', par: '#D6CABC', hit: '#F08A5D' };
 const CLS: Record<Band, string> = { floor: 'c-floor', par: 'c-par', hit: 'c-hit' };
@@ -19,14 +20,16 @@ const range = (b: Band, rules: Rules) => {
   return max == null ? `${pct(min)}% of the pack price or more` : `${pct(min)} to ${pct(max)}% of the pack price`;
 };
 
-/** §02 The packs: bands, the live board of the open series, upcoming series, the flow. */
-export function Packs({ rules, series: initial, upcoming }: { rules: Rules; series: Series; upcoming: UpcomingSeries[] }) {
+/** The live 100-dot board of one series, polled from the API. */
+function Board({ initial }: { initial: Series }) {
+  const { withWallet, open } = useApp();
   const [series, setSeries] = useState(initial);
   const [fresh, setFresh] = useState(-1);
   const prev = useRef(initial.opened.length);
 
+  useEffect(() => { setSeries(initial); }, [initial]);
   useEffect(() => {
-    if (isStill() || reducedMotion()) return;
+    if (isStill()) return;
     return subscribeSeries(initial, setSeries);
   }, [initial]);
 
@@ -43,6 +46,43 @@ export function Packs({ rules, series: initial, upcoming }: { rules: Rules; seri
   }, [series.opened.length]);
 
   const left = series.remaining.floor + series.remaining.par + series.remaining.hit;
+  const canOpen = series.status === 'open' && left > 0 && series.pack_price_usd != null;
+
+  return (
+    <>
+      <div className="series" aria-label={`${series.name}, live counts`}>
+        <div className="hd mono"><span>{series.name} · <b>{series.status === 'sold_out' ? 'sold out' : series.status}</b></span><span id="sleft">{left} of {series.size} left</span></div>
+        <div className="dots" id="dots" aria-hidden="true">
+          {Array.from({ length: series.size }, (_, i) => {
+            const b = series.opened[i];
+            return <i key={i} className={b ? (i === fresh ? 'o new' : 'o') : undefined} style={b ? { background: COL[b] } : undefined} />;
+          })}
+        </div>
+        <div className="left mono" id="left">
+          {BANDS.map(b => (
+            <div key={b}><span>{NAME[b]}</span><u><b className={CLS[b]} id={IDS[b][0]} style={{ width: (series.counts[b] ? series.remaining[b] / series.counts[b] * 100 : 0) + '%' }} /></u><em id={IDS[b][1]}>{series.remaining[b]} / {series.counts[b]}</em></div>
+          ))}
+        </div>
+        {series.left_by_class.length > 0 && <p className="live mono">{series.left_by_class.map(c => `${c.left} ${c.label}`).join(' · ')} left in this pool</p>}
+        <div className="buyrow">
+          <button className="btn" type="button" disabled={!canOpen} onClick={() => withWallet({ kind: 'pack', series })}>
+            {canOpen ? `Open a pack · ${usd(series.pack_price_usd!)}` : series.status === 'sold_out' ? 'Sold out' : 'Not open yet'}
+          </button>
+        </div>
+        <div className="ft mono"><button type="button" className="lnk mono" onClick={() => open({ kind: 'proof', seriesId: series.id, name: series.name })}>Verifiable draw, no replacement ↗</button><span>Composition published before sale</span></div>
+      </div>
+    </>
+  );
+}
+
+/** §02 The packs: bands, the live board of the open series, upcoming series, the flow. */
+export function Packs() {
+  const { data } = useApp();
+  const { rules, upcoming } = data;
+  const list = data.open_series.filter(s => !s.drop_id);
+  const all = list.length ? list : data.series ? [data.series] : [];
+  const [sel, setSel] = useState(all[0]?.id ?? '');
+  const current = all.find(s => s.id === sel) ?? all[0] ?? null;
 
   return (
     <section className="s wrap" id="packs" aria-labelledby="h-packs">
@@ -61,21 +101,12 @@ export function Packs({ rules, series: initial, upcoming }: { rules: Rules; seri
           ))}
         </ul>
         <div className="rv">
-          <div className="series" aria-label={`${series.name}, live counts`}>
-            <div className="hd mono"><span>{series.name} · <b>{series.status === 'sold_out' ? 'sold out' : series.status}</b></span><span id="sleft">{left} of {series.size} left</span></div>
-            <div className="dots" id="dots" aria-hidden="true">
-              {Array.from({ length: series.size }, (_, i) => {
-                const b = series.opened[i];
-                return <i key={i} className={b ? (i === fresh ? 'o new' : 'o') : undefined} style={b ? { background: COL[b] } : undefined} />;
-              })}
+          {all.length > 1 && (
+            <div className="stabs" role="tablist" aria-label="Open series">
+              {all.map(s => <button key={s.id} role="tab" type="button" aria-selected={s.id === current?.id} className={s.id === current?.id ? 'on' : ''} onClick={() => setSel(s.id)}>{s.name}</button>)}
             </div>
-            <div className="left mono" id="left">
-              {BANDS.map(b => (
-                <div key={b}><span>{NAME[b]}</span><u><b className={CLS[b]} id={IDS[b][0]} style={{ width: (series.remaining[b] / series.counts[b] * 100) + '%' }} /></u><em id={IDS[b][1]}>{series.remaining[b]} / {series.counts[b]}</em></div>
-              ))}
-            </div>
-            <div className="ft mono"><span>Verifiable draw, no replacement</span><span>Composition published before sale</span></div>
-          </div>
+          )}
+          {current ? <Board initial={current} /> : <div className="series"><p className="empty">No series is open right now. The next one is announced below.</p></div>}
           <div className="open mono">
             {upcoming.map(u => (
               <div key={u.id}><b>{u.name}</b><span>{u.note}</span></div>

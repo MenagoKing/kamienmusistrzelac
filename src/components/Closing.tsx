@@ -1,5 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { joinWaitlist } from '../data';
+import { useApp } from '../lib/store';
 import { Logo } from './Logo';
 
 /** §06 $ROCKS */
@@ -59,7 +60,7 @@ export function Join() {
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const email = (e.currentTarget.elements.namedItem('em') as HTMLInputElement).value;
-    joinWaitlist(email).then(() => setOk('You’re on the list. We’ll write when the vault opens.'));
+    joinWaitlist(email).then(() => setOk('You’re on the list. We’ll write when the next launch drop is set.'), (er: Error) => setOk(er.message));
   };
   return (
     <section className="final wrap" id="join" aria-labelledby="h-join">
@@ -76,6 +77,7 @@ export function Join() {
 }
 
 export function Footer() {
+  const { data } = useApp();
   return (
     <footer className="wrap">
       <div className="foot">
@@ -85,8 +87,8 @@ export function Footer() {
         {/* TODO: Terms and Privacy pages. They point to the top for now. */}
         <div><h5>Legal</h5><ul><li><a href="#top">Terms</a></li><li><a href="#top">Privacy</a></li></ul></div>
       </div>
-      {/* Remove "Sample data on this page" at launch (HANDOFF). */}
-      <div className="base mono"><span>© 2026 Space Rocks</span><span>Sample data on this page</span></div>
+      {/* "Sample data on this page" is switched off in Admin > Settings at launch (HANDOFF). */}
+      <div className="base mono"><span>© 2026 Space Rocks</span>{data.rules.sample_notice && <span>Sample data on this page</span>}</div>
     </footer>
   );
 }

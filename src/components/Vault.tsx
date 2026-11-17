@@ -1,8 +1,27 @@
-import type { Rules, Specimen } from '../data';
+import type { Specimen } from '../data';
+import { useApp } from '../lib/store';
+import { useStill } from '../lib/stills';
 import { mass, originLabel, statusPill, whereLabel } from '../lib/format';
 
+function Row({ r, i }: { r: Specimen; i: number }) {
+  const { data } = useApp();
+  const img = useStill(r.render, { w: 128, h: 128, rot: -2.2 + i * .18, scale: 1.45 }, r.photo);
+  const [cls, label] = statusPill(r.status);
+  return (
+    <tr>
+      <td><div className="sp"><img alt={r.name} width={64} height={64} src={img} /><div><b>{r.name}</b><small className="mono">{r.id}</small></div></div></td>
+      <td className="m c3">{r.class}</td>
+      <td className="m c4">{mass(r.mass_g)}</td>
+      <td className="m c5">{originLabel(r)}</td>
+      <td className="m">{whereLabel(r, data.rules)}</td>
+      <td className="c6"><span className={`st ${cls}`}>{label}</span></td>
+    </tr>
+  );
+}
+
 /** §04 The vault: public register and the eight items of a specimen file. */
-export function Vault({ register, rules, thumbs }: { register: Specimen[]; rules: Rules; thumbs: (string | undefined)[] }) {
+export function Vault() {
+  const { data, open } = useApp();
   return (
     <section className="s wrap" id="vault" aria-labelledby="h-vault">
       <div className="intro rv">
@@ -12,21 +31,10 @@ export function Vault({ register, rules, thumbs }: { register: Specimen[]; rules
       <table className="reg rv" id="reg">
         <thead><tr><th>Specimen</th><th>Class</th><th>Mass</th><th>Origin</th><th>Where</th><th>Status</th></tr></thead>
         <tbody>
-          {register.map((r, i) => {
-            const [cls, label] = statusPill(r.status);
-            return (
-              <tr key={r.id}>
-                <td><div className="sp"><img alt={r.name} width={64} height={64} src={thumbs[i]} /><div><b>{r.name}</b><small className="mono">{r.id}</small></div></div></td>
-                <td className="m c3">{r.class}</td>
-                <td className="m c4">{mass(r.mass_g)}</td>
-                <td className="m c5">{originLabel(r)}</td>
-                <td className="m">{whereLabel(r, rules)}</td>
-                <td className="c6"><span className={`st ${cls}`}>{label}</span></td>
-              </tr>
-            );
-          })}
+          {data.register.map((r, i) => <Row key={r.id} r={r} i={i} />)}
         </tbody>
       </table>
+      <div className="regmore rv"><button type="button" className="btn line" onClick={() => open({ kind: 'register' })}>Open the full register · {data.register_total} specimens</button></div>
       <ol className="file rv">
         <li><b className="mono">01</b><span>Official name and classification, listed in the Meteoritical Bulletin</span></li>
         <li><b className="mono">02</b><span>Weighed on a calibrated scale, on video</span></li>

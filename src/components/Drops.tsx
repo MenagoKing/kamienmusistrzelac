@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { LaunchDrop } from '../data';
+import type { DropEventKind, LockedSpecimen } from '../data';
+import { useApp } from '../lib/store';
 import { light, once, scene } from '../lib/scene';
+import { usd } from '../lib/format';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
-function remaining(opensAt: string) {
-  const s = Math.max(0, (Date.parse(opensAt) - Date.now()) / 1000);
+function remaining(at: string) {
+  const s = Math.max(0, (Date.parse(at) - Date.now()) / 1000);
   return [Math.floor(s / 86400), Math.floor(s / 3600) % 24, Math.floor(s / 60) % 60];
 }
 
@@ -13,15 +15,22 @@ const Lock = () => (
   <svg className="lockico" viewBox="0 0 11 13" aria-hidden="true"><rect x=".75" y="5.75" width="9.5" height="6.5" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M3 5.5V3.6a2.5 2.5 0 0 1 5 0v1.9" fill="none" stroke="currentColor" strokeWidth="1.4" /></svg>
 );
 
-/** §03 Launch drops: flight timeline, locked specimens in 3D, countdown. */
-export function Drops({ drop }: { drop: LaunchDrop }) {
-  const [clock, setClock] = useState(() => remaining(drop.opens_at));
+const STATE: Record<LockedSpecimen['state'], string> = { locked: 'Locked', unlocked: 'In the pool', raffled: 'Raffled', rolled: 'Rolled over', carried: 'Rolled over' };
+const EVENT: Record<DropEventKind, string> = { liftoff: 'Liftoff', booster_catch: 'Booster catch', ship_catch: 'Ship catch', scrub: 'Scrubbed', fail: 'Missed' };
+
+/** §03 Launch drops: flight timeline, locked specimens in 3D, countdown, the live pool. */
+export function Drops() {
+  const { data, withWallet } = useApp();
+  const drop = data.drop;
+  const target = drop ? (drop.status === 'scheduled' ? drop.opens_at : drop.t0) : null;
+  const [clock, setClock] = useState(() => (target ? remaining(target) : [0, 0, 0]));
   useEffect(() => {
-    const tick = () => setClock(remaining(drop.opens_at));
+    if (!target) return;
+    const tick = () => setClock(remaining(target));
     tick();
     const t = setInterval(tick, 15000);
     return () => clearInterval(t);
-  }, [drop.opens_at]);
+  }, [target]);
 
   const cv = useRef<HTMLCanvasElement>(null);
   const tiles = useRef<HTMLDivElement>(null);
@@ -30,6 +39,7 @@ export function Drops({ drop }: { drop: LaunchDrop }) {
     const c = cv.current;
     if (!once(c) || !tiles.current) return;
     const els = [...tiles.current.querySelectorAll<HTMLElement>('.tile')];
+    if (!els.length) return;
     scene().then(({ RK, THREE }) => {
       const gr = RK.renderer(c, 1.0); gr.setScissorTest(true); const gc = new THREE.PerspectiveCamera(24, 1, .1, 50); gc.position.set(0, 0, 7.6);
       const S = els.map(el => { const s = new THREE.Scene(); light(s, gr); const m = RK.rock({ type: el.dataset.rock, seed: +el.dataset.seed!, level: 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 }); m.scale.setScalar(1.05); s.add(m); return { s, m }; });
@@ -43,6 +53,10 @@ export function Drops({ drop }: { drop: LaunchDrop }) {
       });
     });
   }, []);
+
+  const pool = drop?.series_id ? data.open_series.find(s => s.id === drop.series_id) : undefined;
+  const poolLeft = pool ? pool.remaining.floor + pool.remaining.par + pool.remaining.hit : 0;
+  const locked = (drop?.locked ?? []).slice(0, 3);
 
   return (
     <section className="s wrap" id="drops" aria-labelledby="h-drops">
@@ -59,20 +73,33 @@ export function Drops({ drop }: { drop: LaunchDrop }) {
           <div className="ev" role="listitem"><b className="mono">Scrub or miss</b><h3>It rolls over</h3><p>Locked specimens carry to the next drop, and it grows.</p></div>
         </div>
         <div className="locked rv">
-          <div className="hd mono"><span>Locked in the next drop</span><span>{drop.locked.length} specimens</span></div>
+          <div className="hd mono"><span>{drop ? (drop.status === 'closed' ? `${drop.name} · resolved` : `Locked in ${drop.name.toLowerCase()}`) : 'Locked in the next drop'}</span><span>{drop?.locked.length ?? 0} specimens</span></div>
           <div className="tiles" id="tiles" ref={tiles}>
             <canvas className="over" id="tilecv" ref={cv} aria-hidden="true" />
-            {drop.locked.map((l, i) => (
-              <div className="tile" data-rock={l.render.type} data-seed={l.render.seed} key={i}>
-                <div className="t mono"><span>Batch {l.batch}</span><b><Lock />Locked</b></div>
+            {locked.map(l => (
+              <div className="tile" data-rock={l.render.type} data-seed={l.render.seed} key={l.id}>
+                <div className="t mono"><span>Batch {l.batch}</span><b>{l.state === 'locked' && <Lock />}{STATE[l.state]}</b></div>
                 <h4>{l.name}<small className="mono">{l.class}</small></h4>
               </div>
             ))}
           </div>
-          <div className="clock">
-            <span className="mono" style={{ color: 'var(--mute)' }}>Next drop opens in</span>
-            <span className="d" id="clock" suppressHydrationWarning>{pad(clock[0])}<i>d</i>{pad(clock[1])}<i>h</i>{pad(clock[2])}<i>m</i></span>
-          </div>
+          {drop && drop.status !== 'closed' && (
+            <div className="clock">
+              <span className="mono" style={{ color: 'var(--mute)' }}>{drop.status === 'scheduled' ? 'Next drop opens in' : clock.every(x => x === 0) ? 'In flight' : 'Liftoff in'}</span>
+              <span className="d" id="clock" suppressHydrationWarning>{pad(clock[0])}<i>d</i>{pad(clock[1])}<i>h</i>{pad(clock[2])}<i>m</i></span>
+            </div>
+          )}
+          {drop?.status === 'open' && pool && (
+            <div className="droppool">
+              <span className="mono">{poolLeft} of {pool.size} drop packs left · {usd(pool.pack_price_usd ?? 0)}</span>
+              <button className="btn" type="button" disabled={!poolLeft} onClick={() => withWallet({ kind: 'pack', series: pool })}>{poolLeft ? 'Open a drop pack' : 'Drop sold out'}</button>
+            </div>
+          )}
+          {drop && drop.events.length > 0 && (
+            <ul className="elog mono">
+              {drop.events.map(e => <li key={e.id}><b>{EVENT[e.kind]}</b><span>{new Date(e.created_at).toUTCString().slice(5, 22)} UTC</span><a href={e.source_url} target="_blank" rel="noreferrer">Source ↗</a></li>)}
+            </ul>
+          )}
           <p className="note">Every result is resolved on-chain by a multisig and linked to the official launch source in a public log. Launch dates move; the drop moves with them.</p>
         </div>
       </div>

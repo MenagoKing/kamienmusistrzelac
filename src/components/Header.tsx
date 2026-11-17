@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Logo, NavList } from './Logo';
+import { WalletButton } from './WalletDialog';
 
 /** Fixed header that slides in once the hero is scrolled past. */
 export function Header() {
@@ -16,7 +17,7 @@ export function Header() {
       <div className="in wrap">
         <a href="#top" aria-label="Space Rocks, home"><Logo height={32} /></a>
         <NavList />
-        <a className="btn sm" href="#join">Join the waitlist</a>
+        <WalletButton small />
       </div>
     </header>
   );

@@ -1,8 +1,8 @@
-// Build-time prerender of the page with the data layer's first snapshot (see scripts/prerender.mjs).
+// Server render of the page with live data (server/index.ts injects it and the data as #sr-data).
 import { renderToString } from 'react-dom/server';
 import { App } from './App';
-import { getPageData } from './data';
+import type { PageData } from './data';
 
-export async function render() {
-  return renderToString(<App data={await getPageData()} />);
+export function render(data: PageData) {
+  return renderToString(<App data={data} />);
 }

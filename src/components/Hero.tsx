@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { Logo, NavList } from './Logo';
+import { WalletButton } from './WalletDialog';
 import { isStill, light, once, scene } from '../lib/scene';
 
 export function Hero() {
@@ -65,13 +66,13 @@ export function Hero() {
       <nav className="hnav wrap" aria-label="Main">
         <a href="#top" aria-label="Space Rocks, home"><Logo height={40} /></a>
         <NavList />
-        <a className="btn" href="#join">Join the waitlist</a>
+        <WalletButton />
       </nav>
       <div className="coords mono wrap"><b>29.48° N  7.61° W</b><span>Earth</span><span>Tissint, a Martian fall</span><span>18 July 2011</span></div>
       <div className="lead wrap">
         <h1><span><i>Own a piece</i></span><span><i>of another</i></span><span><i>world.</i></span></h1>
         <p>Buy a real meteorite at a fixed price, or open a sealed pack with a guaranteed floor. Every specimen is certified, weighed on camera, sealed in our vault and minted to your wallet on Solana.</p>
-        <div className="cta"><a className="btn" href="#join">Join the waitlist</a><a className="ghost" href="#market">See the market</a></div>
+        <div className="cta"><a className="btn" href="#packs">Open a pack</a><a className="ghost" href="#market">See the market</a></div>
       </div>
       <div className="spec mono"><b>Shergottite · Martian</b>Tissint, end cut</div>
       <div className="stats">

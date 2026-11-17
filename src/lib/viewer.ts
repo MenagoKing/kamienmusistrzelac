@@ -2,7 +2,7 @@
 // canvas (so a page full of rocks never runs out of WebGL contexts). Drag to turn a rock, it keeps
 // spinning with inertia; viewers off screen are skipped. Uses the design's 3D library (RK) unchanged.
 import type { RenderHint } from '../data';
-import { light, scene } from './scene';
+import { gpuRatio, isTouch, light, scene } from './scene';
 import { planet, planetLight, type PlanetKind } from './planet';
 
 export interface ViewOpts {
@@ -77,7 +77,7 @@ function buildNext() {
 }
 
 function draw(v: View, m: Model) {
-  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const dpr = gpuRatio();
   const cw = Math.max(1, Math.round(v.canvas.clientWidth * dpr)), ch = Math.max(1, Math.round(v.canvas.clientHeight * dpr));
   if (v.canvas.width !== cw || v.canvas.height !== ch) { v.canvas.width = cw; v.canvas.height = ch; }
   ensureSize(cw, ch);
@@ -92,10 +92,19 @@ function draw(v: View, m: Model) {
   v.ctx.drawImage(glCanvas!, 0, H - ch, cw, ch, 0, 0, cw, ch);
 }
 
+let idleBuild = false;
+/** Build models when the browser is idle, so a scroll never stutters on a new rock. */
+function scheduleBuild() {
+  if (idleBuild) return;
+  idleBuild = true;
+  const run = () => { idleBuild = false; buildNext(); };
+  if ('requestIdleCallback' in window) requestIdleCallback(run, { timeout: 250 }); else setTimeout(run, 16);
+}
+
 function frame(t: number) {
   raf = requestAnimationFrame(frame);
   const dt = Math.min(.05, (t - (last || t)) / 1000); last = t;
-  buildNext();
+  scheduleBuild();
   if (fn++ % 12 === 0) views.forEach(v => { // backup for IntersectionObserver
     const r = v.canvas.getBoundingClientRect();
     const vis = r.width > 0 && r.bottom > -120 && r.top < innerHeight + 120;
@@ -122,6 +131,8 @@ function frame(t: number) {
 export function attach(canvas: HTMLCanvasElement, hint: RenderHint, opts: ViewOpts) {
   const given = Object.fromEntries(Object.entries(opts).filter(([, x]) => x !== undefined)) as ViewOpts; // undefined must not erase defaults
   const o: Opts = { auto: opts.mode === 'live' ? .35 : .9, level: 6, scale: 1.3, startRot: -1.6, ...given };
+  // Phones: card rocks use the lighter mesh (still detailed at that size); close-ups keep full detail.
+  if (isTouch() && o.mode === 'hover' && !o.model) o.level = 5;
   const v: View = {
     canvas, ctx: canvas.getContext('2d')!, key: o.model ? `planet:${o.model}` : `${hint.type}:${hint.seed}:${o.level}`, hint, o,
     rotX: 0, rotY: o.startRot, vx: 0, vy: 0, visible: false, hover: false, drag: false, dirty: true,

@@ -48,3 +48,9 @@ export function once(el: Element | null) {
   started.add(el);
   return true;
 }
+
+/** Phones and tablets (touch first). */
+export const isTouch = () => typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
+
+/** Pixel ratio for WebGL: sharp on desktops, lighter on phones so scrolling stays smooth. */
+export const gpuRatio = () => Math.min(typeof devicePixelRatio === 'number' ? devicePixelRatio : 1, isTouch() ? 1.5 : 2);

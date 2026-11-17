@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { DropEventKind, LockedSpecimen } from '../data';
 import { useApp } from '../lib/store';
-import { light, once, scene } from '../lib/scene';
+import { gpuRatio, light, once, scene } from '../lib/scene';
 import { usd } from '../lib/format';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -41,7 +41,7 @@ export function Drops() {
     const els = [...tiles.current.querySelectorAll<HTMLElement>('.tile')];
     if (!els.length) return;
     scene().then(({ RK, THREE }) => {
-      const gr = RK.renderer(c, 1.0); gr.setScissorTest(true); const gc = new THREE.PerspectiveCamera(24, 1, .1, 50); gc.position.set(0, 0, 7.6);
+      const gr = RK.renderer(c, 1.0); gr.setPixelRatio(gpuRatio()); gr.setScissorTest(true); const gc = new THREE.PerspectiveCamera(24, 1, .1, 50); gc.position.set(0, 0, 7.6);
       const S = els.map(el => { const s = new THREE.Scene(); light(s, gr); const m = RK.rock({ type: el.dataset.rock, seed: +el.dataset.seed!, level: 5, stretch: [1.14, .8, .92], chips: 5, dents: .045, cut: [.58, .12, .8], cutD: .42, bump: .011 }); m.scale.setScalar(1.05); s.add(m); return { s, m }; });
       RK.run(c, gr, gc, (t: number) => {
         const cb = c!.getBoundingClientRect(); gr.setClearColor(0, 0); gr.clear();

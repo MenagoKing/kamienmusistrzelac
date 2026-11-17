@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Logo, NavList } from './Logo';
 import { WalletButton } from './WalletDialog';
+import { MobileMenu } from './MobileMenu';
 
 /** Fixed header that slides in once the hero is scrolled past (always shown on other pages). */
 export function Header({ always, base = '' }: { always?: boolean; base?: string }) {
@@ -19,6 +20,7 @@ export function Header({ always, base = '' }: { always?: boolean; base?: string 
         <a href={base + '#top'} aria-label="Space Rocks, home"><Logo height={32} /></a>
         <NavList base={base} />
         <WalletButton small />
+        <MobileMenu base={base} />
       </div>
     </header>
   );

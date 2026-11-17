@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { Logo, NavList } from './Logo';
 import { WalletButton } from './WalletDialog';
-import { isStill, light, once, scene } from '../lib/scene';
+import { MobileMenu } from './MobileMenu';
+import { gpuRatio, isStill, light, once, scene } from '../lib/scene';
 
 export function Hero() {
   const sky = useRef<HTMLCanvasElement>(null);
@@ -37,7 +38,7 @@ export function Hero() {
     const c = stage.current;
     if (!once(c)) return;
     scene().then(({ RK, THREE }) => {
-      const r = RK.renderer(c, 1.05); const sc = new THREE.Scene(); const cam = new THREE.PerspectiveCamera(27, 1, .1, 100); cam.position.set(0, 0, 10); light(sc, r);
+      const r = RK.renderer(c, 1.05); r.setPixelRatio(gpuRatio()); const sc = new THREE.Scene(); const cam = new THREE.PerspectiveCamera(27, 1, .1, 100); cam.position.set(0, 0, 10); light(sc, r);
       const rock = RK.rock({ type: 'martian', seed: 21, level: 6, stretch: [1.14, .8, .94], chips: 5, dents: .05, cut: [.62, .12, .78], cutD: .4, bump: .008 }); sc.add(rock);
       const n = 360, pp = new Float32Array(n * 3), R = RK.mulberry(5); for (let i = 0; i < n; i++) { pp[i * 3] = (R() - .5) * 9; pp[i * 3 + 1] = (R() - .5) * 6; pp[i * 3 + 2] = (R() - .5) * 5; }
       const dg = new THREE.BufferGeometry(); dg.setAttribute('position', new THREE.BufferAttribute(pp, 3));
@@ -45,7 +46,7 @@ export function Hero() {
       let sy = 0; addEventListener('scroll', () => { sy = scrollY; }, { passive: true });
       RK.run(c, r, cam, (t: number) => {
         const hh = Math.tan(cam.fov * Math.PI / 360) * cam.position.z, half = hh * cam.aspect, wide = cam.aspect > 1.15;
-        rock.position.set(wide ? half * .43 : 0, wide ? hh * .06 : hh * .4, 0); rock.scale.setScalar(wide ? Math.min(2.3, half * .37) : Math.min(.95, half * .62));
+        rock.position.set(wide ? half * .43 : 0, wide ? hh * .06 : hh * .5, 0); rock.scale.setScalar(wide ? Math.min(2.3, half * .37) : Math.min(.8, half * .56));
         rock.rotation.set(.3 + Math.sin(t * .21) * .05 + Math.min(sy, 1500) * .0004, -2.25 + t * .1 + Math.min(sy, 1500) * .0012, .1); rock.position.y += Math.sin(t * .55) * .045;
         dust.rotation.y = t * .012; dust.position.y = (t * .035) % 1 - .5; r.render(sc, cam);
       });
@@ -67,6 +68,7 @@ export function Hero() {
         <a href="#top" aria-label="Space Rocks, home"><Logo height={40} /></a>
         <NavList />
         <WalletButton />
+        <MobileMenu />
       </nav>
       <div className="coords mono wrap"><b>29.48° N  7.61° W</b><span>Earth</span><span>Tissint, a Martian fall</span><span>18 July 2011</span></div>
       <div className="lead wrap">

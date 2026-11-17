@@ -78,7 +78,7 @@
 @media (max-width:980px){
   .pk2{grid-template-columns:minmax(0,1fr)}.pk2-pack{position:static}.pk2-pack .pcov{max-width:230px}
   .opn2-rock{animation:rin 1s cubic-bezier(.2,.7,.1,1) both,rtop .9s .7s cubic-bezier(.2,.7,.1,1) forwards}
-  @keyframes rtop{to{top:22%;width:min(300px,70vw);height:min(300px,70vw)}}
+  @keyframes rtop{to{top:24%;width:min(270px,66vw);height:min(270px,66vw)}}
   .opn2-panel{top:auto;bottom:16px;right:50%;transform:translateX(50%);max-height:58svh;animation:pnlm .7s 1s cubic-bezier(.2,.7,.1,1) both}
   @keyframes pnlm{from{opacity:0;transform:translate(50%,30px)}}
 }

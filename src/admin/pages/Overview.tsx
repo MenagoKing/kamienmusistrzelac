@@ -3,7 +3,7 @@ import type { LaunchDrop, Series } from '../../../shared/types.ts';
 import { Badge, Card, ErrorBox, Loading, PageHead, Stat, ago, money, money0, short, useFetch, when } from '../ui';
 
 interface OverviewData {
-  revenue: { packs: number; market: number; redemption_fees: number; buybacks_paid: number };
+  revenue: { packs: number; market: number; redemption_fees: number; buybacks_paid: number; royalties: number; secondary_volume: number };
   reserves: { rocks_buyback: number; launch_reserve: number; ops: number; inventory: number };
   counts: { specimens: number; by_state: Record<string, number>; vault_value: number; packs_opened: number; wallets: number; waitlist: number; redemptions_open: number; drafts: number; sold_back_waiting: number };
   days: { day: string; packs: number; market: number; buyback: number }[];
@@ -49,7 +49,7 @@ function SeriesMini({ s }: { s: Series }) {
   );
 }
 
-const KIND: Record<string, string> = { pack: 'Pack opened', market_buy: 'Market sale', buyback: 'Buyback paid', redemption_fee: 'Redemption', redemption_refund: 'Refund', raffle: 'Drop raffle' };
+const KIND: Record<string, string> = { pack: 'Pack opened', market_buy: 'Market sale', secondary_sale: 'Collector sale', seller_payout: 'Seller payout', buyback: 'Buyback paid', redemption_fee: 'Redemption', redemption_refund: 'Refund', raffle: 'Drop raffle' };
 
 export function Overview() {
   const { data, error, loading, reload } = useFetch<OverviewData>('/api/admin/overview');
@@ -57,7 +57,7 @@ export function Overview() {
   if (loading && !data) return <Loading />;
   if (!data) return null;
   const { revenue: r, reserves: rs, counts: c } = data;
-  const gross = r.packs + r.market + r.redemption_fees;
+  const gross = r.packs + r.market + r.redemption_fees + r.royalties;
   const todo: { t: string; href: string; n: number }[] = [
     { t: 'redemptions to ship', href: '#/redemptions', n: c.redemptions_open },
     { t: 'specimens with an incomplete file', href: '#/specimens', n: c.drafts },
@@ -72,7 +72,7 @@ export function Overview() {
 
       <div className="stats4">
         <Stat label="Gross sales" value={money0(gross)} hint={`${money0(r.packs)} packs · ${money0(r.market)} market`} tone="hot" />
-        <Stat label="Buybacks paid" value={money0(r.buybacks_paid)} hint="USDC, instant offers" />
+        <Stat label="Buybacks paid" value={money0(r.buybacks_paid)} hint={`USDC · collector trades ${money0(r.secondary_volume)}, royalties ${money(r.royalties)}`} />
         <Stat label="Vault value" value={money0(c.vault_value)} hint={`${c.specimens} specimens on record`} />
         <Stat label="Packs opened" value={c.packs_opened.toLocaleString()} hint={`${c.wallets} collectors · ${c.waitlist} on the waitlist`} />
       </div>

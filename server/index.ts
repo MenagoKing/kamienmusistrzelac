@@ -41,6 +41,10 @@ http.createServer(async (req, res) => {
     const { pathname } = new URL(req.url ?? '/', 'http://local');
     if (pathname === '/' || pathname === '/index.html') return void (await page(res));
     if (pathname === '/admin' || pathname.startsWith('/admin/')) return void file(res, '/admin.html');
+    if (pathname === '/account' || pathname.startsWith('/account/')) {
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+      return void res.end(template.replace('<title>', '<meta name="robots" content="noindex"><title>'));
+    }
     if (file(res, decodeURIComponent(pathname))) return;
     res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Not found');

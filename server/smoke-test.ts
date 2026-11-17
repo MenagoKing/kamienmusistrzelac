@@ -83,6 +83,53 @@ try {
   assert.ok(v.ok, v.problems.join('; '));
   console.log('drop proof verified', v.checked, 'pulls');
 
+  // accounts: register, duplicate, wrong password, login, profile
+  const reg = await ok('POST', '/api/auth/register', { username: 'stargazer_1', email: 'a@example.com', password: 'longpassword' }, 'p1');
+  assert.ok(reg.address);
+  assert.equal((await call('POST', '/api/auth/register', { username: 'Stargazer_1', email: 'b@example.com', password: 'longpassword' }, 'p2')).status, 409);
+  assert.equal((await call('POST', '/api/auth/register', { username: 'ab', email: 'b@example.com', password: 'longpassword' }, 'p2')).status, 400);
+  assert.equal((await call('POST', '/api/auth/login', { login: 'a@example.com', password: 'wrong-one' }, 'p3')).status, 401);
+  await ok('POST', '/api/auth/register', { username: 'buyer_2', email: 'b@example.com', password: 'longpassword' }, 'p2');
+  await ok('POST', '/api/auth/logout', {}, 'p1');
+  assert.equal(await ok('GET', '/api/me', undefined, 'p1'), null);
+  await ok('POST', '/api/auth/login', { login: 'STARGAZER_1', password: 'longpassword' }, 'p1');
+  let p1me = await ok('GET', '/api/me', undefined, 'p1');
+  assert.equal(p1me.profile.username, 'stargazer_1');
+  assert.equal(p1me.profile.level, 1);
+
+  // p1 opens packs, lists one, p2 buys it; royalty and payout land in the ledger
+  for (let i = 0; i < 3; i++) await ok('POST', '/api/series/001/open', { currency: 'USDC' }, 'p1');
+  p1me = await ok('GET', '/api/me', undefined, 'p1');
+  assert.equal(p1me.holdings.length, 3);
+  assert.ok(p1me.profile.xp >= 30 && p1me.profile.achievements.find((a: any) => a.id === 'first_light').done);
+  const sell = p1me.holdings[0];
+  const listing = await ok('POST', `/api/specimens/${sell.id}/list`, { price_usd: 150 }, 'p1');
+  assert.equal((await call('POST', `/api/specimens/${sell.id}/sell-back`, {}, 'p1')).status, 409);
+  assert.equal((await call('POST', `/api/listings/${listing.id}/buy`, {}, 'p1')).status, 409);
+  const pub = await ok('GET', '/api/page');
+  assert.ok(pub.listings.some((l: any) => l.id === listing.id && l.seller === 'stargazer_1'));
+  const bought = await ok('POST', `/api/listings/${listing.id}/buy`, { currency: 'SOL' }, 'p2');
+  assert.equal(bought.reveal.specimen.id, sell.id);
+  assert.equal((await call('POST', `/api/listings/${listing.id}/buy`, {}, 'p2')).status, 409);
+  const p2me = await ok('GET', '/api/me', undefined, 'p2');
+  assert.ok(p2me.holdings.some((h: any) => h.id === sell.id && h.acquired_via === 'secondary'));
+  p1me = await ok('GET', '/api/me', undefined, 'p1');
+  assert.equal(p1me.profile.stats.sold, 1);
+  assert.equal(p1me.profile.stats.earned, 145.5);
+  const ov2 = await ok('GET', '/api/admin/overview', undefined, 'admin');
+  assert.equal(ov2.revenue.royalties, 4.5);
+  // listing then cancel; profile edits; password change
+  const l2 = await ok('POST', `/api/specimens/${p1me.holdings[0].id}/list`, { price_usd: 99 }, 'p1');
+  await ok('POST', `/api/listings/${l2.id}/cancel`, {}, 'p1');
+  assert.equal((await call('PUT', '/api/me/profile', { username: 'buyer_2' }, 'p1')).status, 409);
+  await ok('PUT', '/api/me/profile', { username: 'meteor_mike', avatar_seed: 42 }, 'p1');
+  assert.equal((await call('PUT', '/api/me/password', { current: 'nope', next: 'evenlongerpass' }, 'p1')).status, 401);
+  await ok('PUT', '/api/me/password', { current: 'longpassword', next: 'evenlongerpass' }, 'p1');
+  await ok('POST', '/api/auth/login', { login: 'meteor_mike', password: 'evenlongerpass' }, 'p4');
+  const wl = await ok('GET', '/api/admin/wallets', undefined, 'admin');
+  assert.ok(wl.some((w: any) => w.username === 'meteor_mike'));
+  console.log('accounts + collector market ok');
+
   const p1 = await ok('GET', '/api/series/001/proof');
   assert.equal(p1.server_seed, null);
   await ok('PUT', '/api/admin/settings', { ...(await ok('GET', '/api/admin/settings', undefined, 'admin')), sol_usd: 175 }, 'admin');

@@ -78,10 +78,47 @@ export interface Specimen {
   photo?: string | null;
   /** NFT mint address once minted. */
   mint?: string | null;
-  /** Short owner address ("7xKX…9fQ2") when held. */
+  /** Owner's callsign, or short address ("7xKX…9fQ2"), when held. */
   owner?: string | null;
+  /** Active collector listing, when the holder has put it up for sale. */
+  listing?: { id: string; price_usd: number } | null;
   render: RenderHint;
 }
+
+/** A specimen a collector has listed for sale to other collectors (secondary market). */
+export interface Listing {
+  id: string;
+  price_usd: number;
+  seller: string; // callsign or short address
+  mine?: boolean;
+  created_at: string;
+  specimen: Specimen;
+}
+
+export interface Achievement { id: string; title: string; desc: string; done: boolean; progress?: string }
+
+/** A collector's profile with game progress (computed from their history). */
+export interface Profile {
+  address: string;
+  username: string | null;
+  email: string | null;
+  has_password: boolean;
+  avatar_seed: number;
+  linked_wallet: string | null;
+  kind: string;
+  created_at: string;
+  level: number;
+  xp: number;
+  xp_level_start: number;
+  xp_next: number;
+  rank: string;
+  next_rank: string | null;
+  stats: { held: number; value: number; packs: number; hits: number; sold: number; earned: number; redeemed: number };
+  book: { type: RockType; label: string; held: number; ever: boolean }[];
+  achievements: Achievement[];
+}
+
+export interface Activity { id: string; kind: string; usd: number; specimen_id: string | null; specimen_name: string | null; created_at: string }
 
 /** Full specimen record, admin only. */
 export interface SpecimenAdmin {
@@ -230,10 +267,11 @@ export interface PageData {
   reveal: PackReveal;
   drop: LaunchDrop | null;
   stats: PageStats;
+  listings: Listing[];
 }
 
 export interface Holding extends Specimen {
-  acquired_via: 'market' | 'pack' | 'raffle';
+  acquired_via: 'market' | 'pack' | 'raffle' | 'secondary';
   acquired_at: string;
   paid_usd: number | null;
   band: Band | null;
@@ -256,9 +294,12 @@ export interface Redemption {
 export interface Me {
   address: string;
   kind: string;
+  profile: Profile;
   holdings: Holding[];
   pulls: PackReveal[];
   redemptions: Redemption[];
+  listings: Listing[];
+  activity: Activity[];
 }
 
 export interface TxResult {

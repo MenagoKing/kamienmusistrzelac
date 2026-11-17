@@ -1,4 +1,5 @@
-import type { Specimen } from '../data';
+import { useState } from 'react';
+import type { Listing, Specimen } from '../data';
 import { useApp } from '../lib/store';
 import { useStill } from '../lib/stills';
 import { marketPrice, mass, originLabel, usd } from '../lib/format';
@@ -20,23 +21,48 @@ function Lot({ p, i }: { p: Specimen; i: number }) {
   );
 }
 
-/** §01 The market: one card per listed specimen, fixed price. */
+function CollectorLot({ l, i }: { l: Listing; i: number }) {
+  const { me, withWallet, toast } = useApp();
+  const p = l.specimen;
+  const img = useStill(p.render, { w: 420, h: 311, rot: -2.2 + i * .17, scale: 1.25 }, p.photo);
+  const mine = l.mine || (me && p.owner === me.profile.username);
+  return (
+    <article className="lot">
+      <img alt={`${p.name}, ${p.class}`} width={420} height={311} src={img} />
+      <div className="top mono"><span>{p.id}</span><span className="by">{mine ? 'Your listing' : `Listed by ${l.seller}`}</span></div>
+      <h3>{p.name}</h3>
+      <div className="cl">{p.class} · {mass(p.mass_g)}</div>
+      <div className="px"><b>{usd(l.price_usd)}</b>{p.vault_value_usd != null && <small className="mono">Vault value {usd(p.vault_value_usd)}</small>}</div>
+      <button type="button" className="buy" onClick={() => (mine ? toast('That one is yours: manage it from your account') : withWallet({ kind: 'buy-listing', listing: l }))}>Buy {p.name} from {l.seller}</button>
+    </article>
+  );
+}
+
+/** §01 The market: the vault's fixed-price listings, and specimens collectors put up for sale. */
 export function Market() {
   const { data } = useApp();
+  const [tab, setTab] = useState<'vault' | 'collectors'>('vault');
+  const collectors = data.listings ?? [];
   return (
     <section className="s wrap" id="market" aria-labelledby="h-market">
       <div className="intro rv">
         <div><div className="sec mono"><span>§01</span><span>The market</span></div><h2 id="h-market">Pick the rock. Pay the price.</h2></div>
         <p>Every specimen in the vault is listed on its own, at one fixed price set from its documented purchase price. No draw, no luck: you see the exact rock you buy, with its whole file.</p>
       </div>
-      {data.market.length ? (
-        <div className="mkt rv" id="mkt">
-          {data.market.map((p, i) => <Lot key={p.id} p={p} i={i} />)}
-        </div>
+      <div className="stabs mtabs rv" role="tablist" aria-label="Market">
+        <button role="tab" type="button" aria-selected={tab === 'vault'} className={tab === 'vault' ? 'on' : ''} onClick={() => setTab('vault')}>From the vault · {data.market.length}</button>
+        <button role="tab" type="button" aria-selected={tab === 'collectors'} className={tab === 'collectors' ? 'on' : ''} onClick={() => setTab('collectors')}>From collectors · {collectors.length}</button>
+      </div>
+      {tab === 'vault' ? (
+        data.market.length ? (
+          <div className="mkt rv in" id="mkt">{data.market.map((p, i) => <Lot key={p.id} p={p} i={i} />)}</div>
+        ) : <p className="mkt-empty">Everything listed has found a home. New specimens are being filed; the next listings appear here first.</p>
       ) : (
-        <p className="mkt-empty rv">Everything listed has found a home. New specimens are being filed; the next listings appear here first.</p>
+        collectors.length ? (
+          <div className="mkt rv in">{collectors.map((l, i) => <CollectorLot key={l.id} l={l} i={i} />)}</div>
+        ) : <p className="mkt-empty">No collector has a specimen up for sale right now. Yours can be the first: open your account and choose “Sell to collectors”.</p>
       )}
-      <div className="rule mono rv"><span>Fixed price per specimen</span><span>Full file on every listing</span><span>Minted to your wallet when you buy</span></div>
+      <div className="rule mono rv"><span>{tab === 'vault' ? 'Fixed price per specimen' : 'Prices set by collectors'}</span><span>Full file on every listing</span><span>{tab === 'vault' ? 'Minted to your wallet when you buy' : `${Math.round(data.rules.royalty * 100)}% goes back to the vault`}</span></div>
     </section>
   );
 }

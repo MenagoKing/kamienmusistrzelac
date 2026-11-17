@@ -10,6 +10,9 @@ import * as A from './admin.ts';
 import { getRules, holdingsOf, pageData, redemptionOf, seriesProof, seriesRow, specimenRow, toPublic, toReveal, toSeries, vaultRegister } from './store.ts';
 import { all } from './db.ts';
 import { ensureSeeded, reseed } from './seed.ts';
+import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile } from './accounts.ts';
+import { adminListings, buyListing, cancelListing, listForSale, listingsOf } from './market.ts';
+import { publicListings } from './store.ts';
 
 ensureSeeded();
 
@@ -46,15 +49,41 @@ on('GET', '/api/me', ({ req }) => {
   const w = get<{ kind: string }>('SELECT kind FROM wallets WHERE address = ?', address);
   return {
     address, kind: w?.kind ?? 'wallet',
+    profile: profileOf(address),
     holdings: holdingsOf(address),
     pulls: all<any>('SELECT * FROM pulls WHERE wallet = ? ORDER BY created_at DESC LIMIT 50', address).map(toReveal),
     redemptions: all<any>('SELECT * FROM redemptions WHERE wallet = ? ORDER BY created_at DESC', address).map(redemptionOf),
+    listings: listingsOf(address),
+    activity: activityOf(address),
   };
 });
 on('POST', '/api/market/:id/buy', ({ req, params, body }) => buyMarket(requireWallet(req), params[0], body?.currency));
 on('POST', '/api/series/:id/open', ({ req, params, body }) => openPack(requireWallet(req), params[0], body?.currency, body?.client_seed));
 on('POST', '/api/specimens/:id/sell-back', ({ req, params }) => sellBack(requireWallet(req), params[0]));
 on('POST', '/api/specimens/:id/redeem', ({ req, params, body }) => redeem(requireWallet(req), params[0], body));
+
+/* ---------- accounts ---------- */
+
+on('POST', '/api/auth/register', ({ req, res, body }) => register(req, res, body));
+on('POST', '/api/auth/login', ({ req, res, body }) => login(req, res, body));
+on('PUT', '/api/me/profile', ({ req, body }) => updateProfile(requireWallet(req), body));
+on('PUT', '/api/me/password', ({ req, body }) => changePassword(requireWallet(req), body));
+on('POST', '/api/me/link-wallet', ({ req, body }) => linkWallet(requireWallet(req), body));
+on('POST', '/api/me/unlink-wallet', ({ req }) => unlinkWallet(requireWallet(req)));
+
+/* ---------- collectors' market ---------- */
+
+on('GET', '/api/listings', ({ req }) => publicListings(walletOf(req)));
+on('POST', '/api/specimens/:id/list', ({ req, params, body }) => listForSale(requireWallet(req), params[0], body));
+on('POST', '/api/listings/:id/cancel', ({ req, params }) => cancelListing(requireWallet(req), params[0]));
+on('POST', '/api/listings/:id/buy', ({ req, params, body }) => {
+  const r = buyListing(requireWallet(req), params[0], body?.currency);
+  const s = r.specimen;
+  return {
+    payment: r.payment, mint: s.mint, listing: r.listing,
+    reveal: { pull_id: null, series_id: null, band: 'par', pack_price_usd: r.listing.price_usd, vault_value_usd: s.vault_value_usd ?? 0, specimen: { id: s.id, name: s.name, class: s.class.replace(', ', ' '), mass_g: s.mass_g, render: { type: s.category, seed: s.render_seed } } },
+  };
+});
 
 /* ---------- admin ---------- */
 
@@ -97,6 +126,8 @@ admin('POST', '/drops/:id/events', ({ params, body }, a) => A.dropEvent(a, param
 admin('GET', '/redemptions', ({ query }) => A.listRedemptions(query.get('status')));
 admin('PUT', '/redemptions/:id', ({ params, body }, a) => A.updateRedemption(a, params[0], body));
 admin('GET', '/wallets', () => A.listWallets());
+admin('GET', '/listings', ({ query }) => adminListings(query.get('status')));
+admin('POST', '/listings/:id/cancel', ({ params }, a) => { const r = cancelListing(null, params[0], true); audit(a, 'listing.cancel', params[0]); return r; });
 admin('GET', '/wallets/:address', ({ params }) => A.walletDetail(params[0]));
 admin('GET', '/ledger', ({ query }) => A.listLedger(query));
 admin('GET', '/waitlist', () => A.listWaitlist());

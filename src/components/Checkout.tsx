@@ -7,6 +7,7 @@ import { buyback, marketPrice, mass, multiple, originLabel, pct, sol, usd } from
 import { BANDS, BAND_NAME, CATEGORY_NAME } from '../../shared/rules.ts';
 import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
+import { api } from '../lib/api';
 
 function PayWith({ value, onChange, price }: { value: Currency; onChange: (c: Currency) => void; price: number }) {
   const { data } = useApp();
@@ -175,6 +176,47 @@ export function RevealDialog({ reveal, payment, mint, via }: { reveal: PackRevea
       </div>
       {via === 'pack' && PIECE[sp.render.type] && state !== 'sold' && <p className="brag mono">You pulled {PIECE[sp.render.type]}.</p>}
       {via !== 'pack' && <p className="fine">{CATEGORY_NAME[sp.render.type]} · held in the vault under your wallet until you decide what happens next.</p>}
+    </Overlay>
+  );
+}
+
+/* ---------- collector listings ---------- */
+
+export function BuyListingDialog({ listing }: { listing: import('../data').Listing }) {
+  const { data, open, refresh, toast } = useApp();
+  const sp = listing.specimen;
+  const [cur, setCur] = useState<Currency>('USDC');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const img = useStill(sp.render, { w: 520, h: 346, rot: -1.25, scale: 1.35 }, sp.photo);
+  const done = sp.file_done ?? [];
+  const buy = async () => {
+    setBusy(true); setErr('');
+    try {
+      const r = await api<{ reveal: PackReveal; payment: TxResult; mint: string }>('POST', `/api/listings/${listing.id}/buy`, { currency: cur });
+      await refresh();
+      toast(`${sp.name} is yours`);
+      open({ kind: 'reveal', reveal: r.reveal, payment: r.payment, mint: r.mint, via: 'market' });
+    } catch (e: any) { setErr(e.message); setBusy(false); }
+  };
+  return (
+    <Overlay label={`Buy ${sp.name} from ${listing.seller}`} wide title={<div className="sec mono"><span>From collectors</span><span>{sp.id}</span></div>}>
+      <div className="co">
+        <div className="co-ph"><img src={img} alt={`${sp.name}, ${sp.class}`} /></div>
+        <div className="co-bd">
+          <h3>{sp.name}</h3>
+          <div className="cl mono">{sp.class} · {mass(sp.mass_g)} · {originLabel(sp)}</div>
+          <p className="seller mono">Listed by <b>{listing.seller}</b></p>
+          <ul className="chk">{FILE_ITEMS.map((f, i) => <li key={f.key} className={done[i] ? 'y' : ''}>{f.label}</li>)}</ul>
+          <dl className="kv"><dt>Vault value</dt><dd>{sp.vault_value_usd != null ? usd(sp.vault_value_usd) : '—'}</dd><dt>Collector’s price</dt><dd>{usd(listing.price_usd)}</dd>{sp.vault_value_usd != null && <><dt>Instant offer if you sell back</dt><dd>{usd(buyback(sp.vault_value_usd, data.rules))}</dd></>}</dl>
+          <PayWith value={cur} onChange={setCur} price={listing.price_usd} />
+          {err && <p className="err" role="alert">{err}</p>}
+          {listing.mine ? <p className="ok">This is your listing. Manage it from your account.</p> : (
+            <button className="btn wide" type="button" onClick={buy} disabled={busy}>{busy ? <><Spinner label="Paying" />Confirming…</> : `Buy for ${cur === 'USDC' ? usd(listing.price_usd) : sol(listing.price_usd, data.rules)}`}</button>
+          )}
+          <p className="fine">The rock stays sealed in the vault; the NFT moves to you. {pct(data.rules.royalty)}% of the price goes back to the vault’s inventory. Simulated chain on this preview.</p>
+        </div>
+      </div>
     </Overlay>
   );
 }

@@ -38,6 +38,8 @@ export function overview() {
       packs: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'pack'"),
       market: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'market_buy'"),
       redemption_fees: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'redemption_fee'"),
+      royalties: sum("SELECT SUM(usd) s FROM ledger WHERE kind IN ('secondary_sale', 'seller_payout')"),
+      secondary_volume: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'secondary_sale'"),
       buybacks_paid: -sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'buyback'"),
     },
     reserves: { rocks_buyback: reserve('rocks_buyback'), launch_reserve: reserve('launch_reserve'), ops: reserve('ops'), inventory: reserve('inventory') },
@@ -541,15 +543,15 @@ export function updateRedemption(actor: string, id: string, b: any) {
 /* ---------- wallets, ledger, waitlist, audit ---------- */
 
 export function listWallets() {
-  return all<any>(`SELECT w.*, (SELECT COUNT(*) FROM specimens s WHERE s.owner = w.address AND s.state = 'held') holdings,
+  return all<any>(`SELECT w.*, u.username, u.email, (SELECT COUNT(*) FROM specimens s WHERE s.owner = w.address AND s.state = 'held') holdings,
     (SELECT COUNT(*) FROM pulls p WHERE p.wallet = w.address AND p.bonus = 0) pulls,
     (SELECT coalesce(SUM(usd), 0) FROM ledger l WHERE l.wallet = w.address AND l.usd > 0) spent
-    FROM wallets w ORDER BY last_seen DESC`);
+    FROM wallets w LEFT JOIN users u ON u.address = w.address ORDER BY w.last_seen DESC`);
 }
 
 export function walletDetail(address: string) {
   return {
-    wallet: get<any>('SELECT * FROM wallets WHERE address = ?', address) ?? fail(404, 'Wallet not found'),
+    wallet: get<any>('SELECT w.*, u.username, u.email, u.linked_wallet, u.last_login FROM wallets w LEFT JOIN users u ON u.address = w.address WHERE w.address = ?', address) ?? fail(404, 'Wallet not found'),
     holdings: all<SpecimenRow>('SELECT * FROM specimens WHERE owner = ? ORDER BY acquired_at DESC', address).map(toAdmin),
     ledger: all<any>('SELECT * FROM ledger WHERE wallet = ? ORDER BY created_at DESC', address),
   };

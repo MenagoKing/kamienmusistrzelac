@@ -7,7 +7,7 @@ import { Specimens } from './pages/Specimens';
 import { SeriesList, SeriesPage } from './pages/Series';
 import { DropPage, DropsList } from './pages/Drops';
 import { Redemptions } from './pages/Redemptions';
-import { Orders, Wallets, Waitlist, AuditLog } from './pages/Records';
+import { Listings, Orders, Wallets, Waitlist, AuditLog } from './pages/Records';
 import { Settings } from './pages/Settings';
 
 const NAV: { id: string; label: string; icon: ReactNode; group?: string }[] = [
@@ -17,6 +17,7 @@ const NAV: { id: string; label: string; icon: ReactNode; group?: string }[] = [
   { id: 'drops', label: 'Launch drops', icon: <path d="M12 2c3 3 4 7 4 11l-4 4-4-4c0-4 1-8 4-11zM8 13l-3 3 1 4 3-2M16 13l3 3-1 4-3-2M12 9v.01" /> },
   { id: 'redemptions', label: 'Redemptions', group: 'Operations', icon: <path d="M3 7l9-4 9 4v10l-9 4-9-4zM3 7l9 4 9-4M12 11v10" /> },
   { id: 'orders', label: 'Orders & ledger', icon: <path d="M5 3h14v18l-3-2-2 2-2-2-2 2-2-2-3 2zM9 8h6M9 12h6M9 16h3" /> },
+  { id: 'listings', label: 'Collector listings', icon: <path d="M20 12l-8 8-9-9V3h8zM7.5 7.5h.01" /> },
   { id: 'wallets', label: 'Collectors', icon: <><circle cx="9" cy="8" r="4" /><path d="M2 21c0-4 3-6 7-6s7 2 7 6M17 4a4 4 0 010 8M19 15c2 1 3 3 3 6" /></> },
   { id: 'waitlist', label: 'Waitlist', icon: <path d="M4 5h16v14H4zM4 6l8 7 8-7" /> },
   { id: 'settings', label: 'Rules & settings', group: 'System', icon: <><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.2 4.2l2.1 2.1M17.7 17.7l2.1 2.1M2 12h3M19 12h3M4.2 19.8l2.1-2.1M17.7 6.3l2.1-2.1" /></> },
@@ -75,6 +76,7 @@ function Shell({ onLogout }: { onLogout: () => void }) {
     case 'redemptions': page = <Redemptions />; break;
     case 'orders': page = <Orders />; break;
     case 'wallets': page = <Wallets openId={sub} />; break;
+    case 'listings': page = <Listings />; break;
     case 'waitlist': page = <Waitlist />; break;
     case 'settings': page = <Settings />; break;
     case 'audit': page = <AuditLog />; break;

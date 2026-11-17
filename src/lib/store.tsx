@@ -1,17 +1,19 @@
-// App state for the site: page data, the signed-in wallet, the open dialog and toasts.
+// App state for the site and the account page: page data, the signed-in collector, the open dialog, toasts.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getMe, getPageData, type Holding, type Me, type PackReveal, type PageData, type Series, type Specimen, type TxResult } from '../data';
+import { getMe, getPageData, type Holding, type Listing, type Me, type PackReveal, type PageData, type Series, type Specimen, type TxResult } from '../data';
 
 export type Dialog =
-  | { kind: 'wallet'; then?: Dialog }
+  | { kind: 'auth'; mode?: 'login' | 'register'; then?: Dialog }
   | { kind: 'buy'; specimen: Specimen }
+  | { kind: 'buy-listing'; listing: Listing }
   | { kind: 'pack'; series: Series }
   | { kind: 'reveal'; reveal: PackReveal; payment?: TxResult; mint?: string; via: 'pack' | 'market' | 'holding' }
+  | { kind: 'item'; holding: Holding }
+  | { kind: 'list'; holding: Holding }
   | { kind: 'redeem'; specimen: Holding | PackReveal['specimen'] }
   | { kind: 'share'; reveal: PackReveal }
   | { kind: 'register' }
-  | { kind: 'proof'; seriesId: string; name: string }
-  | { kind: 'account'; tab?: 'holdings' | 'pulls' | 'redemptions' };
+  | { kind: 'proof'; seriesId: string; name: string };
 
 interface Toast { id: number; text: string; tone: 'ok' | 'err' }
 
@@ -22,7 +24,7 @@ interface Ctx {
   dialog: Dialog | null;
   open: (d: Dialog) => void;
   close: () => void;
-  /** Opens d, asking for a wallet first if none is connected. */
+  /** Opens d, asking the visitor to sign in first if needed. */
   withWallet: (d: Dialog) => void;
   refresh: () => Promise<void>;
   toast: (text: string, tone?: Toast['tone']) => void;
@@ -63,7 +65,7 @@ export function AppProvider({ initial, children }: { initial: PageData; children
     data, me, meLoaded, dialog, toasts, toast, refresh,
     open: d => setDialog(d),
     close: () => setDialog(null),
-    withWallet: d => setDialog(meRef.current ? d : { kind: 'wallet', then: d }),
+    withWallet: d => setDialog(meRef.current ? d : { kind: 'auth', then: d }),
   }), [data, me, meLoaded, dialog, toasts, toast, refresh]);
 
   return <AppCtx.Provider value={value}>{children}</AppCtx.Provider>;
@@ -74,3 +76,6 @@ export function useApp() {
   if (!c) throw new Error('useApp outside AppProvider');
   return c;
 }
+
+/** Display name for the signed-in collector. */
+export const callsign = (me: Me | null) => me?.profile.username ?? (me ? me.address.slice(0, 4) + '…' + me.address.slice(-4) : '');

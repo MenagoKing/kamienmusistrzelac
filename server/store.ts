@@ -1,6 +1,6 @@
 // Read side: settings, row mappers and the public queries the site uses.
 import type {
-  Band, DropEvent, Holding, LaunchDrop, LockedSpecimen, PackReveal, PageData, Redemption, RockType, Rules,
+  Band, DropEvent, Holding, LaunchDrop, Listing, LockedSpecimen, PackReveal, PageData, Redemption, RockType, Rules,
   Series, SeriesProof, Specimen, SpecimenAdmin, SpecimenFile, SpecimenState, SpecimenStatus, Tier, UpcomingSeries,
 } from '../shared/types.ts';
 import { FILE_ITEMS } from '../shared/types.ts';
@@ -66,13 +66,22 @@ export function statusOf(r: SpecimenRow): SpecimenStatus {
   }
 }
 
+/** Callsign if the collector has one, else the short address. */
+export function displayName(address: string | null | undefined) {
+  if (!address) return null;
+  const u = get<{ username: string | null }>('SELECT username FROM users WHERE address = ?', address);
+  return u?.username ?? shortAddr(address);
+}
+
 export function toPublic(r: SpecimenRow): Specimen {
   const f = fileOf(r);
+  const l = r.state === 'held' ? get<{ id: string; price_usd: number }>("SELECT id, price_usd FROM listings WHERE specimen_id = ? AND status = 'active'", r.id) : undefined;
   return {
     id: r.id, name: r.name, class: r.class, mass_g: r.mass_g, origin: r.origin, fall: parseFall(r.fall),
     vault_value_usd: r.vault_value_usd, status: statusOf(r),
     file_done: [...FILE_ITEMS.map(i => present(f[i.key])), !!r.mint],
-    photo: photoOf(r), mint: r.mint, owner: r.owner ? shortAddr(r.owner) : null,
+    photo: photoOf(r), mint: r.mint, owner: displayName(r.owner),
+    listing: l ? { id: l.id, price_usd: l.price_usd } : null,
     render: { type: r.category, seed: r.render_seed },
   };
 }
@@ -187,7 +196,7 @@ export function holdingsOf(wallet: string): Holding[] {
   const rows = all<SpecimenRow>("SELECT * FROM specimens WHERE owner = ? AND state IN ('held', 'redeeming') ORDER BY acquired_at DESC", wallet);
   return rows.map(r => {
     const pull = get<{ band: Band }>('SELECT band FROM pulls WHERE specimen_id = ? AND wallet = ? ORDER BY created_at DESC LIMIT 1', r.id, wallet);
-    return { ...toPublic(r), acquired_via: (r.acquired_via ?? 'market') as Holding['acquired_via'], acquired_at: r.acquired_at ?? r.updated_at, paid_usd: r.paid_usd, band: r.acquired_via === 'market' ? null : pull?.band ?? null };
+    return { ...toPublic(r), acquired_via: (r.acquired_via ?? 'market') as Holding['acquired_via'], acquired_at: r.acquired_at ?? r.updated_at, paid_usd: r.paid_usd, band: r.acquired_via === 'pack' || r.acquired_via === 'raffle' ? pull?.band ?? null : null };
   });
 }
 
@@ -195,6 +204,22 @@ export function redemptionOf(r: any): Redemption {
   const s = specimenRow(r.specimen_id);
   return { ...r, specimen_name: s?.name ?? r.specimen_id, address: JSON.parse(r.address) };
 }
+
+
+/* ---------- collector listings ---------- */
+
+export interface ListingRow { id: string; specimen_id: string; seller: string; price_usd: number; status: string; buyer: string | null; created_at: string; closed_at: string | null }
+
+export const activeListing = (specimenId: string) => get<ListingRow>("SELECT * FROM listings WHERE specimen_id = ? AND status = 'active'", specimenId);
+
+export function toListing(l: ListingRow, viewer?: string | null): Listing {
+  return { id: l.id, price_usd: l.price_usd, seller: displayName(l.seller) ?? '', mine: !!viewer && viewer === l.seller, created_at: l.created_at, specimen: toPublic(specimenRow(l.specimen_id)!) };
+}
+
+export function publicListings(viewer?: string | null): Listing[] {
+  return all<ListingRow>("SELECT * FROM listings WHERE status = 'active' ORDER BY created_at DESC LIMIT 60").map(l => toListing(l, viewer));
+}
+
 
 /* ---------- the page ---------- */
 
@@ -216,7 +241,7 @@ export function pageData(): PageData {
     redeemed: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE state = 'redeemed'")!.n,
   };
   const live = open.find(s => s.status === 'open') ?? open[0] ?? null;
-  return { rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
+  return { listings: publicListings(), rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
 }
 
 export function vaultRegister(q = '', state = ''): Specimen[] {

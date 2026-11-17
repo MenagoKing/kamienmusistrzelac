@@ -68,6 +68,17 @@ CREATE TABLE IF NOT EXISTS wallets (address TEXT PRIMARY KEY, kind TEXT NOT NULL
 CREATE TABLE IF NOT EXISTS sessions (token TEXT PRIMARY KEY, subject TEXT NOT NULL, role TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS nonces (address TEXT PRIMARY KEY, message TEXT NOT NULL, expires_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS waitlist (email TEXT PRIMARY KEY, created_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS users (
+  address TEXT PRIMARY KEY, username TEXT UNIQUE COLLATE NOCASE, email TEXT UNIQUE COLLATE NOCASE,
+  password_hash TEXT, avatar_seed INTEGER NOT NULL DEFAULT 1, linked_wallet TEXT,
+  created_at TEXT NOT NULL, last_login TEXT
+);
+CREATE TABLE IF NOT EXISTS listings (
+  id TEXT PRIMARY KEY, specimen_id TEXT NOT NULL, seller TEXT NOT NULL, price_usd REAL NOT NULL,
+  status TEXT NOT NULL, buyer TEXT, created_at TEXT NOT NULL, closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS listings_status ON listings(status);
+CREATE INDEX IF NOT EXISTS listings_specimen ON listings(specimen_id);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '',
   detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
@@ -87,6 +98,7 @@ function open() {
 
 /** One connection per process (survives Vite's module reloads in dev). */
 export const db: DatabaseSync = g.__srdb ?? (g.__srdb = open());
+db.exec(SCHEMA); // idempotent: picks up new tables when Vite reloads this module in dev
 
 export const all = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).all(...p) as T[];
 export const get = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).get(...p) as T | undefined;

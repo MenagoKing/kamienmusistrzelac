@@ -14,11 +14,11 @@ export const NAV = [
   ['#faq', 'FAQ'],
 ] as const;
 
-export function NavList() {
+export function NavList({ base = '' }: { base?: string }) {
   return (
     <ul className="navl">
       {NAV.map(([href, label]) => (
-        <li key={href}><a href={href}>{label}</a></li>
+        <li key={href}><a href={base + href}>{label}</a></li>
       ))}
     </ul>
   );

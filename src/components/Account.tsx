@@ -1,75 +1,17 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { api } from '../lib/api';
 import { redeemSpecimen, type Holding, type PackReveal } from '../data';
 import { useApp } from '../lib/store';
 import { still, useStill } from '../lib/stills';
-import { buyback, mass, usd } from '../lib/format';
-import { BAND_NAME, CATEGORY_NAME, shortAddr } from '../../shared/rules.ts';
+import { buyback, marketPrice, mass, originLabel, pct, usd } from '../lib/format';
+import { BAND_NAME } from '../../shared/rules.ts';
+import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
-import { disconnect } from './WalletDialog';
 
-const holdingReveal = (h: Holding): PackReveal => ({
+export const holdingReveal = (h: Holding): PackReveal => ({
   pull_id: null, series_id: null, band: h.band ?? 'par', pack_price_usd: h.paid_usd ?? h.vault_value_usd ?? 0, vault_value_usd: h.vault_value_usd ?? 0,
   specimen: { id: h.id, name: h.name, class: h.class.replace(', ', ' '), mass_g: h.mass_g, render: h.render, photo: h.photo },
 });
-
-function HoldingCard({ h }: { h: Holding }) {
-  const { data, open } = useApp();
-  const img = useStill(h.render, { w: 200, h: 150, rot: -1.6, scale: 1.3 }, h.photo);
-  const shipping = h.status.kind === 'redeeming';
-  return (
-    <li className="hold">
-      <img src={img} alt="" width={100} height={75} />
-      <div>
-        <b>{h.name}</b>
-        <small className="mono">{h.class} · {mass(h.mass_g)} · {h.id}</small>
-        <small className="mono">{h.acquired_via === 'market' ? 'Bought on the market' : h.acquired_via === 'raffle' ? 'Launch drop raffle' : `Pack · ${BAND_NAME[h.band ?? 'floor']}`}{h.vault_value_usd != null && ` · vault ${usd(h.vault_value_usd)}`}</small>
-        {shipping ? <span className="st red">Shipping</span> : (
-          <div className="hacts">
-            <button type="button" className="lnk" onClick={() => open({ kind: 'reveal', reveal: holdingReveal(h), via: 'holding' })}>Sell back{h.vault_value_usd != null && ` · ${usd(buyback(h.vault_value_usd, data.rules))}`}</button>
-            <button type="button" className="lnk" onClick={() => open({ kind: 'redeem', specimen: h })}>Redeem</button>
-            <button type="button" className="lnk" onClick={() => open({ kind: 'share', reveal: holdingReveal(h) })}>Share</button>
-          </div>
-        )}
-      </div>
-    </li>
-  );
-}
-
-export function AccountDrawer({ tab: initial = 'holdings' }: { tab?: 'holdings' | 'pulls' | 'redemptions' }) {
-  const { me, refresh, close, toast } = useApp();
-  const [tab, setTab] = useState(initial);
-  useEffect(() => { refresh(); }, [refresh]);
-  if (!me) return null;
-  const value = me.holdings.reduce((a, h) => a + (h.status.kind === 'held' ? h.vault_value_usd ?? 0 : 0), 0);
-  return (
-    <Overlay side label="Your vault" title={<><div className="sec mono"><span>Your vault</span><span>{me.kind === 'demo' ? 'Demo wallet' : me.kind}</span></div><h3 className="addr mono" title={me.address}>{shortAddr(me.address)}</h3></>}>
-      <div className="sum">
-        <div><b>{me.holdings.length}</b><span className="mono">Specimens</span></div>
-        <div><b>{usd(value)}</b><span className="mono">Vault value</span></div>
-        <div><b>{me.pulls.filter(p => !p.bonus).length}</b><span className="mono">Packs opened</span></div>
-      </div>
-      <div className="tabs" role="tablist">
-        {(['holdings', 'pulls', 'redemptions'] as const).map(t => (
-          <button key={t} role="tab" aria-selected={tab === t} className={tab === t ? 'on' : ''} type="button" onClick={() => setTab(t)}>{t === 'holdings' ? 'Holdings' : t === 'pulls' ? 'Pulls' : 'Shipments'}</button>
-        ))}
-      </div>
-      {tab === 'holdings' && (me.holdings.length ? <ul className="holds">{me.holdings.map(h => <HoldingCard key={h.id} h={h} />)}</ul> : <p className="empty">Nothing here yet. <a href="#market" onClick={close}>Pick a rock</a> or <a href="#packs" onClick={close}>open a pack</a>.</p>)}
-      {tab === 'pulls' && (me.pulls.length ? (
-        <ul className="plist">{me.pulls.map((p, i) => (
-          <li key={p.pull_id ?? i}><i className={'c-' + p.band} /><span><b>{p.specimen.name}</b><small className="mono">{p.bonus ? 'Bonus pull · launch drop' : `Series ${p.series_id}`} · {CATEGORY_NAME[p.specimen.render.type]}</small></span><em className="mono">{BAND_NAME[p.band]} · {usd(p.vault_value_usd)}</em></li>
-        ))}</ul>
-      ) : <p className="empty">No packs opened yet.</p>)}
-      {tab === 'redemptions' && (me.redemptions.length ? (
-        <ul className="plist">{me.redemptions.map(r => (
-          <li key={r.id}><span><b>{r.specimen_name}</b><small className="mono">{r.address.city}, {r.address.country}{r.tracking && ` · ${r.tracking}`}</small></span><em className={'st ' + (r.status === 'cancelled' ? 'pend' : r.status === 'delivered' || r.status === 'shipped' ? 'pool' : 'held')}>{r.status}</em></li>
-        ))}</ul>
-      ) : <p className="empty">No shipments. Redeem a specimen to get the rock itself.</p>)}
-      <div className="dfoot">
-        <button type="button" className="btn line sm" onClick={async () => { await disconnect(refresh); toast('Disconnected'); close(); }}>Disconnect</button>
-      </div>
-    </Overlay>
-  );
-}
 
 /* ---------- redeem ---------- */
 
@@ -78,7 +20,7 @@ const regionName = (() => {
 })();
 
 export function RedeemDialog({ specimen }: { specimen: Holding | PackReveal['specimen'] }) {
-  const { data, refresh, toast, open } = useApp();
+  const { data, refresh, toast } = useApp();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [done, setDone] = useState<{ tx: string; simulated: boolean } | null>(null);
@@ -99,7 +41,7 @@ export function RedeemDialog({ specimen }: { specimen: Holding | PackReveal['spe
           <h3 className="dlg-h">The capsule is coming home.</h3>
           <p className="dlg-p">We burned the NFT and opened a shipment for {specimen.name}. You’ll get the tracking number by email, and it shows in your vault under Shipments.</p>
           <TxLine tx={done.tx} simulated={done.simulated} label="Fee paid" />
-          <div className="acts"><button className="btn" type="button" onClick={() => open({ kind: 'account', tab: 'redemptions' })}>See shipments</button></div>
+          <div className="acts"><a className="btn" href="/account#shipments">See shipments</a></div>
         </>
       ) : (
         <form className="fm" onSubmit={submit}>
@@ -181,6 +123,93 @@ export function ShareDialog({ reveal }: { reveal: PackReveal }) {
         <a className={'btn line' + (url ? '' : ' dis')} href={url || undefined} download={`space-rocks-${sp.id}.png`}>Download card</a>
       </div>
       <p className="fine">Download the card and attach it to your post.</p>
+    </Overlay>
+  );
+}
+
+/* ---------- a specimen in your collection ---------- */
+
+const VIA: Record<Holding['acquired_via'], string> = { market: 'Bought on the market', pack: 'Pulled from a pack', raffle: 'Won in a launch drop raffle', secondary: 'Bought from a collector' };
+
+export function ItemDialog({ holding: h }: { holding: Holding }) {
+  const { data, open, refresh, toast, close } = useApp();
+  const img = useStill(h.render, { w: 520, h: 346, rot: -1.25, scale: 1.35 }, h.photo);
+  const [busy, setBusy] = useState(false);
+  const done = h.file_done ?? [];
+  const vault = h.vault_value_usd ?? 0;
+  const shipping = h.status.kind === 'redeeming';
+  const unlist = async () => {
+    if (!h.listing) return;
+    setBusy(true);
+    try { await api('POST', `/api/listings/${h.listing.id}/cancel`, {}); await refresh(); toast('Taken off sale'); close(); } catch (e: any) { toast(e.message, 'err'); } finally { setBusy(false); }
+  };
+  return (
+    <Overlay wide label={h.name} title={<div className="sec mono"><span>Your collection</span><span>{h.id}</span></div>}>
+      <div className="co">
+        <div className="co-ph"><img src={img} alt={`${h.name}, ${h.class}`} />{h.band && <span className={'chip' + (h.band !== 'hit' ? ' ' + h.band : '')}>{BAND_NAME[h.band].toUpperCase()}</span>}</div>
+        <div className="co-bd">
+          <h3>{h.name}</h3>
+          <div className="cl mono">{h.class} · {mass(h.mass_g)} · {originLabel(h)}</div>
+          <dl className="kv">
+            <dt>{VIA[h.acquired_via]}</dt><dd>{new Date(h.acquired_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</dd>
+            {h.paid_usd != null && <><dt>You paid</dt><dd>{h.paid_usd ? usd(h.paid_usd) : 'Free'}</dd></>}
+            <dt>Vault value</dt><dd>{usd(vault)}</dd>
+            <dt>Instant offer, {pct(data.rules.buyback_share)}%</dt><dd className="hot">{usd(buyback(vault, data.rules))}</dd>
+            {h.listing && <><dt>Listed for collectors</dt><dd>{usd(h.listing.price_usd)}</dd></>}
+          </dl>
+          <ul className="chk cols">
+            {FILE_ITEMS.map((f, i) => <li key={f.key} className={done[i] ? 'y' : ''}>{f.label}</li>)}
+            <li className={h.mint ? 'y' : ''}>NFT{h.mint ? ` ${h.mint.slice(0, 4)}…${h.mint.slice(-4)}` : ' burned for shipping'}</li>
+          </ul>
+          {shipping ? <p className="ok">On its way to you. Tracking is under Shipments.</p> : h.listing ? (
+            <div className="acts">
+              <button className="btn line" type="button" disabled={busy} onClick={unlist}>{busy ? <><Spinner label="Working" />Working…</> : 'Take off sale'}</button>
+              <button className="btn line" type="button" onClick={() => open({ kind: 'share', reveal: holdingReveal(h) })}>Share</button>
+            </div>
+          ) : (
+            <div className="acts">
+              <button className="btn" type="button" onClick={() => open({ kind: 'list', holding: h })}>Sell to collectors</button>
+              <button className="btn line" type="button" onClick={() => open({ kind: 'reveal', reveal: holdingReveal(h), via: 'holding' })}>Sell back · {usd(buyback(vault, data.rules))}</button>
+              <button className="btn line" type="button" onClick={() => open({ kind: 'redeem', specimen: h })}>Redeem</button>
+              <button className="btn line" type="button" onClick={() => open({ kind: 'share', reveal: holdingReveal(h) })}>Share</button>
+            </div>
+          )}
+        </div>
+      </div>
+    </Overlay>
+  );
+}
+
+/* ---------- list for sale ---------- */
+
+export function ListDialog({ holding: h }: { holding: Holding }) {
+  const { data, refresh, toast, close } = useApp();
+  const vault = h.vault_value_usd ?? 0;
+  const ref = vault ? marketPrice(vault, data.rules) : 0;
+  const [price, setPrice] = useState(ref ? String(ref) : '');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const p = Number(price) || 0;
+  const fee = Math.round(p * data.rules.royalty * 100) / 100;
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    try { await api('POST', `/api/specimens/${h.id}/list`, { price_usd: p }); await refresh(); toast(`${h.name} is on sale for ${usd(p)}`); close(); } catch (er: any) { setErr(er.message); } finally { setBusy(false); }
+  };
+  return (
+    <Overlay label={`Sell ${h.name}`} title={<div className="sec mono"><span>Sell to collectors</span><span>{h.id}</span></div>}>
+      <form className="fm" onSubmit={submit}>
+        <h3 className="dlg-h">Set your price for {h.name}.</h3>
+        <p className="dlg-p">It shows on the market under “From collectors”. Whoever buys it gets the NFT and the rock’s place in the vault. You can take it off sale any time before that.</p>
+        <label>Your price, USD<input type="number" min={1} step="0.01" value={price} onChange={e => setPrice(e.target.value)} required data-autofocus /></label>
+        <div className="refs">
+          <button type="button" onClick={() => setPrice(String(ref))}>Market price <b>{usd(ref)}</b></button>
+          <button type="button" onClick={() => setPrice(String(vault))}>Vault value <b>{usd(vault)}</b></button>
+        </div>
+        <dl className="kv"><dt>Royalty to the vault, {pct(data.rules.royalty)}%</dt><dd>{usd(fee)}</dd><dt>You receive, in USDC</dt><dd className="hot">{usd(Math.max(0, p - fee))}</dd><dt>Or sell back now for</dt><dd>{usd(buyback(vault, data.rules))}</dd></dl>
+        {err && <p className="err" role="alert">{err}</p>}
+        <button className="btn wide" type="submit" disabled={busy || p < 1}>{busy ? <><Spinner label="Listing" />Listing…</> : `List for ${usd(p)}`}</button>
+      </form>
     </Overlay>
   );
 }

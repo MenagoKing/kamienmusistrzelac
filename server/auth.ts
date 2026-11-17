@@ -9,7 +9,7 @@ import { DATA_DIR, get, now, run } from './db.ts';
 import { getRules } from './store.ts';
 import { b58decode, b58encode, fail, randomHex } from './util.ts';
 
-const DAY = 86400000;
+export const DAY = 86400000;
 const SECURE = process.env.NODE_ENV === 'production' && process.env.INSECURE_COOKIES !== '1';
 
 export function cookies(req: IncomingMessage): Record<string, string> {
@@ -27,7 +27,7 @@ function setCookie(res: ServerResponse, name: string, value: string, maxAgeMs: n
   res.setHeader('Set-Cookie', [...(Array.isArray(prev) ? prev : prev ? [String(prev)] : []), c]);
 }
 
-function newSession(res: ServerResponse, cookie: string, subject: string, role: 'wallet' | 'admin', ttl: number) {
+export function newSession(res: ServerResponse, cookie: string, subject: string, role: 'wallet' | 'admin', ttl: number) {
   const token = randomHex(32);
   run('INSERT INTO sessions (token, subject, role, expires_at) VALUES (?, ?, ?, ?)', token, subject, role, Date.now() + ttl);
   run('DELETE FROM sessions WHERE expires_at < ?', Date.now());
@@ -86,11 +86,12 @@ function verifyEd25519(address: string, message: string, signature: Uint8Array) 
   return crypto.verify(null, Buffer.from(message, 'utf8'), key, Buffer.from(signature));
 }
 
-function touchWallet(address: string, kind: string) {
+export function touchWallet(address: string, kind: string) {
   run('INSERT INTO wallets (address, kind, created_at, last_seen) VALUES (?, ?, ?, ?) ON CONFLICT(address) DO UPDATE SET last_seen = excluded.last_seen', address, kind, now(), now());
 }
 
-export function walletVerify(res: ServerResponse, body: any) {
+/** Checks a signed sign-in message for this address (one-time nonce). Returns the address. */
+export function verifyWalletSignature(body: any) {
   const address = checkAddress(body?.address);
   const n = get<{ message: string; expires_at: number }>('SELECT * FROM nonces WHERE address = ?', address);
   if (!n || n.expires_at < Date.now()) fail(400, 'The sign-in request expired, try again');
@@ -98,6 +99,11 @@ export function walletVerify(res: ServerResponse, body: any) {
   try { sig = typeof body?.signature === 'string' ? Uint8Array.from(Buffer.from(body.signature, 'base64')) : new Uint8Array(); } catch { sig = new Uint8Array(); }
   if (sig.length !== 64 || !verifyEd25519(address, n!.message, sig)) fail(401, 'The signature does not match this wallet');
   run('DELETE FROM nonces WHERE address = ?', address);
+  return address;
+}
+
+export function walletVerify(res: ServerResponse, body: any) {
+  const address = verifyWalletSignature(body);
   const kind = ['phantom', 'solflare', 'backpack'].includes(body?.wallet) ? body.wallet : 'wallet';
   touchWallet(address, kind);
   newSession(res, WALLET_COOKIE, address, 'wallet', 30 * DAY);

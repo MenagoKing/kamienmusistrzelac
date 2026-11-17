@@ -93,6 +93,7 @@ export function openPack(wallet: string, seriesId: string, currency: unknown, cl
 function ownedBy(wallet: string, id: string) {
   const s = specimenRow(id) ?? fail(404, 'Specimen not found');
   if (s.owner !== wallet || s.state !== 'held') fail(403, 'You do not hold this specimen');
+  if (get("SELECT 1 FROM listings WHERE specimen_id = ? AND status = 'active'", id)) fail(409, 'Take it off sale first: it is listed for other collectors');
   return s;
 }
 

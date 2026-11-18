@@ -1,12 +1,21 @@
 // SQLite storage (node:sqlite, built into Node 22.5+; no native dependency).
-// The database lives in data/space-rocks.db (git-ignored). Set DATA_DIR to move it.
+//
+// Two networks, two separate worlds: devnet (testing) keeps its data in data/ (as before), mainnet in
+// data/mainnet/. Each has its own database, Solana keys and account wallets, so test orders never mix
+// with real ones. Admin switches the site between them (server/network.ts). A small control database
+// (data/control.db) holds the active network, per-network settings and admin sessions.
+// Set DATA_DIR to move everything.
 import { DatabaseSync } from 'node:sqlite';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import fs from 'node:fs';
 import path from 'node:path';
 
 export const DATA_DIR = path.resolve(process.env.DATA_DIR || 'data');
 export const UPLOAD_DIR = path.join(DATA_DIR, 'uploads');
 fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+
+export type Network = 'devnet' | 'mainnet-beta';
+export const NETWORKS: Network[] = ['devnet', 'mainnet-beta'];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -85,6 +94,12 @@ CREATE TABLE IF NOT EXISTS nft_jobs (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS nft_jobs_status ON nft_jobs(status);
+CREATE TABLE IF NOT EXISTS payouts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, to_owner TEXT NOT NULL, from_party TEXT NOT NULL, currency TEXT NOT NULL,
+  usd REAL NOT NULL, units TEXT NOT NULL, memo TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+  signature TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS payouts_status ON payouts(status);
 CREATE TABLE IF NOT EXISTS custody (owner TEXT PRIMARY KEY, pubkey TEXT NOT NULL UNIQUE, secret_enc TEXT NOT NULL, created_at TEXT NOT NULL, faucet_at TEXT, exported_at TEXT);
 CREATE TABLE IF NOT EXISTS dealers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, country TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'OTHER',
@@ -116,61 +131,133 @@ CREATE TABLE IF NOT EXISTS audit (
 
 type Row = Record<string, any>;
 
-const g = globalThis as unknown as { __srdb?: DatabaseSync };
+const g = globalThis as unknown as { __srconns?: Map<Network, DatabaseSync>; __srctl?: DatabaseSync; __srnet?: Network; __srpin?: AsyncLocalStorage<Network> };
 
-function open() {
-  const db = new DatabaseSync(path.join(DATA_DIR, 'space-rocks.db'));
-  db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
-  db.exec(SCHEMA);
-  return db;
+// Every request and every worker run is pinned to the network it started on (through its awaits),
+// so a network switch can never send a half-finished payment, payout or NFT job to the other network.
+const pin: AsyncLocalStorage<Network> = (g.__srpin ??= new AsyncLocalStorage<Network>());
+
+function openFile(file: string, schema: string) {
+  const c = new DatabaseSync(file);
+  c.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
+  c.exec(schema);
+  return c;
 }
 
-/** One connection per process (survives Vite's module reloads in dev). */
-export const db: DatabaseSync = g.__srdb ?? (g.__srdb = open());
-db.exec(SCHEMA); // idempotent: picks up new tables when Vite reloads this module in dev
+/* ---------- control database: active network, per-network settings, admin sessions ---------- */
+
+const CONTROL_SCHEMA = `
+CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS admin_sessions (token TEXT PRIMARY KEY, subject TEXT NOT NULL, expires_at INTEGER NOT NULL, created_at INTEGER NOT NULL DEFAULT 0);
+`;
+export const ctl: DatabaseSync = g.__srctl ?? (g.__srctl = openFile(path.join(DATA_DIR, 'control.db'), CONTROL_SCHEMA));
+ctl.exec(CONTROL_SCHEMA);
+export const ctlGet = (key: string) => (ctl.prepare('SELECT value FROM kv WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? null;
+export function ctlSet(key: string, value: string | null) {
+  if (value == null || value === '') ctl.prepare('DELETE FROM kv WHERE key = ?').run(key);
+  else ctl.prepare('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value);
+}
+
+/** The network this request or job runs on (pinned when it started), else the site's network. */
+export function activeNetwork(): Network {
+  return pin.getStore() ?? siteNetwork();
+}
+
+/** The network the site runs on: what Admin › Network chose, else SOLANA_CLUSTER, else devnet. */
+export function siteNetwork(): Network {
+  if (g.__srnet) return g.__srnet;
+  const saved = ctlGet('network');
+  const n: Network = saved === 'mainnet-beta' || saved === 'devnet' ? saved : process.env.SOLANA_CLUSTER === 'mainnet-beta' ? 'mainnet-beta' : 'devnet';
+  return (g.__srnet = n);
+}
+export function setActiveNetwork(n: Network) {
+  ctlSet('network', n);
+  g.__srnet = n;
+}
+
+/** Runs fn (and everything it awaits) on the given network. */
+export function onNetwork<T>(n: Network, fn: () => T): T {
+  return pin.run(n, fn);
+}
+
+/** Pins fn to the network that is active now: a switch while it runs does not affect it. */
+export function pinNetwork<T>(fn: () => T): T {
+  return pin.run(activeNetwork(), fn);
+}
+
+/** Where a network keeps its database and keys. Devnet uses the data folder itself (as before). */
+export function netDir(n: Network = activeNetwork()) {
+  const d = n === 'devnet' ? DATA_DIR : path.join(DATA_DIR, 'mainnet');
+  fs.mkdirSync(d, { recursive: true });
+  return d;
+}
+
+/* ---------- one database per network ---------- */
+
+const ready = new WeakSet<DatabaseSync>(); // schema applied by this copy of the module (Vite reloads it in dev)
+
+/** The connection for a network (opened once per process). */
+export function connFor(n: Network): DatabaseSync {
+  const conns = (g.__srconns ??= new Map());
+  let c = conns.get(n);
+  if (!c) { c = openFile(path.join(netDir(n), 'space-rocks.db'), SCHEMA); conns.set(n, c); }
+  if (!ready.has(c)) { c.exec(SCHEMA); migrate(c); ready.add(c); }
+  return c;
+}
+
+/** The active network's connection. */
+export const conn = () => connFor(activeNetwork());
+
+/** The active network's database (follows a network switch). */
+export const db = new Proxy({} as DatabaseSync, {
+  get(_, k) { const c = conn() as any; const v = c[k]; return typeof v === 'function' ? v.bind(c) : v; },
+});
 
 /** Adds columns introduced after a database was created. */
-function addColumn(table: string, col: string, def: string) {
-  const cols = (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(c => c.name);
-  if (!cols.includes(col)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+function migrate(c: DatabaseSync) {
+  const addColumn = (table: string, col: string, def: string) => {
+    const cols = (c.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[]).map(x => x.name);
+    if (!cols.includes(col)) c.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`);
+  };
+  addColumn('specimens', 'mint_status', "TEXT NOT NULL DEFAULT 'none'");
+  addColumn('specimens', 'mint_tx', 'TEXT');
+  addColumn('specimens', 'nft_owner', 'TEXT');
+  addColumn('users', 'google_sub', 'TEXT');
+  addColumn('series', 'ends_at', 'TEXT');
+  // Addendum 1: specimens sourced from dealers, reservations instead of vault stock.
+  addColumn('specimens', 'dealer_id', 'TEXT');
+  addColumn('specimens', 'dealer_price_usd', 'REAL');
+  addColumn('specimens', 'dealer_sku', "TEXT NOT NULL DEFAULT ''");
+  addColumn('specimens', 'dealer_url', "TEXT NOT NULL DEFAULT ''");
+  addColumn('specimens', 'source_status', "TEXT NOT NULL DEFAULT 'available'");
+  addColumn('specimens', 'source_verified_at', 'TEXT');
+  addColumn('redemptions', 'kind', "TEXT NOT NULL DEFAULT 'vault'");
+  addColumn('redemptions', 'reservation_id', 'TEXT');
+  addColumn('redemptions', 'dealer_id', 'TEXT');
+  addColumn('redemptions', 'dealer_order_ref', "TEXT NOT NULL DEFAULT ''");
+  addColumn('redemptions', 'due_at', 'TEXT');
+  addColumn('redemptions', 'shipping_usd', 'REAL');
+  addColumn('redemptions', 'price_delta_usd', 'REAL');
+  addColumn('sessions', 'created_at', 'INTEGER NOT NULL DEFAULT 0');
 }
-addColumn('specimens', 'mint_status', "TEXT NOT NULL DEFAULT 'none'");
-addColumn('specimens', 'mint_tx', 'TEXT');
-addColumn('specimens', 'nft_owner', 'TEXT');
-addColumn('users', 'google_sub', 'TEXT');
-addColumn('series', 'ends_at', 'TEXT');
-// Addendum 1: specimens sourced from dealers, reservations instead of vault stock.
-addColumn('specimens', 'dealer_id', 'TEXT');
-addColumn('specimens', 'dealer_price_usd', 'REAL');
-addColumn('specimens', 'dealer_sku', "TEXT NOT NULL DEFAULT ''");
-addColumn('specimens', 'dealer_url', "TEXT NOT NULL DEFAULT ''");
-addColumn('specimens', 'source_status', "TEXT NOT NULL DEFAULT 'available'");
-addColumn('specimens', 'source_verified_at', 'TEXT');
-addColumn('redemptions', 'kind', "TEXT NOT NULL DEFAULT 'vault'");
-addColumn('redemptions', 'reservation_id', 'TEXT');
-addColumn('redemptions', 'dealer_id', 'TEXT');
-addColumn('redemptions', 'dealer_order_ref', "TEXT NOT NULL DEFAULT ''");
-addColumn('redemptions', 'due_at', 'TEXT');
-addColumn('redemptions', 'shipping_usd', 'REAL');
-addColumn('redemptions', 'price_delta_usd', 'REAL');
-addColumn('sessions', 'created_at', 'INTEGER NOT NULL DEFAULT 0');
 
-export const all = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).all(...p) as T[];
-export const get = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).get(...p) as T | undefined;
-export const run = (sql: string, ...p: any[]) => db.prepare(sql).run(...p);
+export const all = <T = Row>(sql: string, ...p: any[]) => conn().prepare(sql).all(...p) as T[];
+export const get = <T = Row>(sql: string, ...p: any[]) => conn().prepare(sql).get(...p) as T | undefined;
+export const run = (sql: string, ...p: any[]) => conn().prepare(sql).run(...p);
 
 let depth = 0;
 /** Runs fn in a transaction (nested calls join the outer one). */
 export function tx<T>(fn: () => T): T {
   if (depth > 0) return fn();
+  const c = conn();
   depth++;
-  db.exec('BEGIN IMMEDIATE');
+  c.exec('BEGIN IMMEDIATE');
   try {
     const out = fn();
-    db.exec('COMMIT');
+    c.exec('COMMIT');
     return out;
   } catch (e) {
-    db.exec('ROLLBACK');
+    c.exec('ROLLBACK');
     throw e;
   } finally {
     depth--;

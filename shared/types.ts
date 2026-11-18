@@ -139,6 +139,8 @@ export interface WalletInfo {
   custodial: boolean;
   cluster: string;
   balance_sol: number | null;
+  balance_usdc: number | null;
+  payments: 'live' | 'simulated';
   error: string | null;
   nfts_on_chain: number;
   nfts_pending: number;
@@ -314,7 +316,8 @@ export interface PageData {
   drop: LaunchDrop | null;
   stats: PageStats;
   listings: Listing[];
-  chain: { cluster: string };
+  /** The network the site runs on and whether payments move real funds on it. */
+  chain: { cluster: string; payments?: 'live' | 'simulated' };
   /** Paying with the project token (off until switched on). */
   token: { enabled: boolean; symbol: string; discount: number; price_usd: number | null };
 }
@@ -392,6 +395,8 @@ export interface TxResult {
   amount: number;
   usd: number;
   simulated: boolean;
+  /** A payout queued for sending (live payments): no signature yet. */
+  pending?: boolean;
 }
 
 export interface ProofPull {

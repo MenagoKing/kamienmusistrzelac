@@ -278,6 +278,134 @@ try {
   assert.equal(p1.server_seed, null);
   await ok('PUT', '/api/admin/settings', { ...(await ok('GET', '/api/admin/settings', undefined, 'admin')), sol_usd: 175 }, 'admin');
   assert.equal((await call('PUT', '/api/admin/settings', { ev_target: 0.5 }, 'admin')).status, 400);
+
+  // ---- live payments, against an in-memory stand-in for Solana ----
+  {
+    const { b58encode } = await import('./util.ts');
+    const db = await import('./db.ts');
+    const USDC = 'USDCtest';
+    const usdc: Record<string, number> = {}, sol: Record<string, number> = {};
+    let onPay: (() => void) | null = null;
+    const owner = (secret: Uint8Array) => b58encode(secret.subarray(32));
+    let sigs = 0;
+    (globalThis as any).__srtestlive = {
+      USDC_MINT: { devnet: USDC, 'mainnet-beta': USDC },
+      balanceSol: async () => 5,
+      balanceOf: async (a: string) => sol[a] ?? 0,
+      tokenBalance: async (a: string) => usdc[a] ?? 0,
+      paySol: async ({ secret, transfers }: any) => { const f = owner(secret); for (const t of transfers) { sol[f] = (sol[f] ?? 0) - Number(t.lamports) / 1e9; sol[t.to] = (sol[t.to] ?? 0) + Number(t.lamports) / 1e9; } onPay?.(); return 'sig' + ++sigs; },
+      payTokens: async ({ secret, transfers }: any) => { const f = owner(secret); for (const t of transfers) { usdc[f] = Math.round(((usdc[f] ?? 0) - Number(t.units) / 1e6) * 1e6) / 1e6; usdc[t.to] = Math.round(((usdc[t.to] ?? 0) + Number(t.units) / 1e6) * 1e6) / 1e6; } onPay?.(); return 'sig' + ++sigs; },
+    };
+    const flush = async () => { for (let i = 0; i < 8; i++) { await new Promise(r => setTimeout(r, 150)); if (!db.get("SELECT 1 FROM payouts WHERE status IN ('pending', 'sending')")) break; } };
+    const treasury = db.get<{ pubkey: string }>("SELECT pubkey FROM custody WHERE owner = 'sys:treasury'")!.pubkey;
+    const escrow = db.get<{ pubkey: string }>("SELECT pubkey FROM custody WHERE owner = 'sys:escrow'")!.pubkey;
+    await ok('POST', '/api/auth/register', { username: 'live_payer', email: 'live@example.com', password: 'longpassword' }, 'lp');
+    const lp = (await ok('GET', '/api/me', undefined, 'lp')).address;
+    const pg = await ok('GET', '/api/page');
+    const rules = pg.rules;
+    const pick = pg.market.filter((m: any) => m.sourced && m.source_available !== false);
+    const listP = (r: number) => Math.round(r * rules.market_markup * 100) / 100;
+    // not enough USDC: nothing moves, nothing is written
+    const poor = await call('POST', `/api/market/${pick[0].id}/buy`, { currency: 'USDC', expected_price_usd: listP(pick[0].source_price_usd) }, 'lp');
+    assert.equal(poor.status, 402);
+    assert.equal(poor.data.code, 'funds');
+    assert.equal((await ok('GET', `/api/specimens/${pick[0].id}`)).status.kind, 'on_market');
+    // paid: the rock price goes to the escrow wallet, the commission to the treasury
+    usdc[lp] = 1000;
+    const res1 = await ok('POST', `/api/market/${pick[0].id}/buy`, { currency: 'USDC', expected_price_usd: listP(pick[0].source_price_usd) }, 'lp');
+    assert.equal(res1.payment.simulated, false);
+    assert.ok(res1.payment.tx.startsWith('sig'));
+    const rock1 = pick[0].source_price_usd, paid1 = listP(rock1);
+    assert.equal(usdc[lp], Math.round((1000 - paid1) * 1e6) / 1e6);
+    assert.equal(usdc[escrow], rock1, 'rock price in the escrow wallet');
+    assert.equal(usdc[treasury], Math.round((paid1 - rock1) * 1e6) / 1e6, 'commission in the treasury');
+    // cancel: the rock price comes back from the escrow wallet through the payout queue
+    const c1 = await ok('POST', `/api/reservations/${res1.reservation.id}/cancel`, {}, 'lp');
+    assert.equal(c1.payout.pending, true);
+    await flush();
+    assert.equal(usdc[escrow], 0, 'escrow emptied');
+    assert.equal(usdc[lp], Math.round((1000 - (paid1 - rock1)) * 1e6) / 1e6, 'only the commission was kept');
+    // sold while paying: the purchase cannot complete and the whole payment is refunded
+    const before = usdc[lp];
+    onPay = () => db.run("UPDATE specimens SET state = 'vault' WHERE id = ?", pick[1].id);
+    const race = await call('POST', `/api/market/${pick[1].id}/buy`, { currency: 'USDC', expected_price_usd: listP(pick[1].source_price_usd) }, 'lp');
+    onPay = null;
+    assert.equal(race.status, 409);
+    assert.match(race.data.error, /refund/i);
+    await flush();
+    assert.equal(usdc[lp], before, 'refunded in full');
+    db.run("UPDATE specimens SET state = 'market' WHERE id = ?", pick[1].id);
+    // a pack paid in SOL goes to the treasury
+    sol[lp] = 10;
+    const pk = await ok('POST', '/api/series/001/open', { currency: 'SOL' }, 'lp');
+    assert.equal(pk.payment.currency, 'SOL');
+    assert.ok(sol[treasury] > 0 && Math.abs(sol[lp] + sol[treasury] - 10) < 1e-9);
+    // the admin sees the queue
+    const q = await ok('GET', '/api/admin/payouts', undefined, 'admin');
+    assert.ok(q.live && q.rows.some((r: any) => r.memo.startsWith('cancel') && r.status === 'done'));
+    delete (globalThis as any).__srtestlive;
+    console.log('live payments ok');
+  }
+
+  // ---- devnet / mainnet: separate data, admin switch ----
+  {
+    assert.equal((await call('POST', '/api/admin/network/switch', { network: 'mainnet-beta', password: 'nope', confirm: 'MAINNET' }, 'admin')).status, 401);
+    assert.equal((await call('POST', '/api/admin/network/switch', { network: 'mainnet-beta', password: 'test-password' }, 'admin')).status, 400);
+    const devSpecimen = (await ok('GET', '/api/page')).market[0].id;
+    const st2 = await ok('POST', '/api/admin/network/switch', { network: 'mainnet-beta', password: 'test-password', confirm: 'MAINNET' }, 'admin');
+    assert.equal(st2.active, 'mainnet-beta');
+    const mp = await ok('GET', '/api/page');
+    assert.equal(mp.market.length, 0, 'mainnet starts empty');
+    assert.equal(mp.rules.demo_wallet, false);
+    assert.equal(await ok('GET', '/api/me', undefined, 'p1'), null, 'devnet accounts do not exist on mainnet');
+    await ok('GET', '/api/admin/overview', undefined, 'admin'); // the admin stays signed in
+    assert.equal((await call('POST', '/api/admin/reseed', {}, 'admin')).status, 403, 'mainnet can never be reset');
+    assert.equal((await call('POST', '/api/auth/demo', {}, 'm1')).status, 403);
+    await ok('POST', '/api/auth/register', { username: 'mainnet_mike', email: 'm@example.com', password: 'longpassword' }, 'm1');
+    assert.equal((await call('GET', `/api/nft/mainnet/${devSpecimen}.json`)).status, 404);
+    assert.equal((await ok('GET', `/api/nft/devnet/${devSpecimen}.json`)).name.includes(devSpecimen), true, 'devnet NFT metadata still served while mainnet is active');
+    await ok('PUT', '/api/admin/network/mainnet-beta', { rpc_url: 'https://rpc.example.com/?api-key=secret123', priority_fee: 50000 }, 'admin');
+    const ns = await ok('GET', '/api/admin/network', undefined, 'admin');
+    const mn = ns.networks.find((n: any) => n.id === 'mainnet-beta');
+    assert.equal(mn.rpc_custom, true);
+    assert.equal(mn.payments, 'live');
+    assert.ok(mn.checks.length >= 5);
+    assert.equal((await call('PUT', '/api/admin/network/mainnet-beta', { payments_live: false }, 'admin')).status, 400);
+    await ok('POST', '/api/admin/network/switch', { network: 'devnet', password: 'test-password' }, 'admin');
+    assert.equal((await ok('GET', '/api/me', undefined, 'p1')).profile.username, 'meteor_mike', 'back on devnet, devnet accounts are back');
+    assert.equal(await ok('GET', '/api/me', undefined, 'm1'), null);
+
+    // a payment in flight on devnet finishes on devnet even if the admin switches to mainnet meanwhile
+    const db = await import('./db.ts');
+    const { b58encode } = await import('./util.ts');
+    const bal: Record<string, number> = {};
+    const lpAddr = (await ok('GET', '/api/me', undefined, 'lp')).address;
+    bal[lpAddr] = 1000;
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>(r => { release = r; });
+    (globalThis as any).__srtestlive = {
+      USDC_MINT: { devnet: 'U', 'mainnet-beta': 'U' },
+      balanceSol: async () => 5, balanceOf: async () => 0, tokenBalance: async (a: string) => bal[a] ?? 0,
+      paySol: async () => 'x',
+      payTokens: async ({ secret, transfers }: any) => { await gate; const f = b58encode(secret.subarray(32)); for (const t of transfers) { bal[f] -= Number(t.units) / 1e6; bal[t.to] = (bal[t.to] ?? 0) + Number(t.units) / 1e6; } return 'pinned-sig'; },
+    };
+    const target = (await ok('GET', '/api/page')).market.find((m: any) => m.sourced && m.source_available !== false);
+    const price = Math.round(target.source_price_usd * (await ok('GET', '/api/page')).rules.market_markup * 100) / 100;
+    const inFlight = call('POST', `/api/market/${target.id}/buy`, { currency: 'USDC', expected_price_usd: price }, 'lp');
+    await new Promise(r => setTimeout(r, 50));
+    await ok('POST', '/api/admin/network/switch', { network: 'mainnet-beta', password: 'test-password', confirm: 'MAINNET' }, 'admin');
+    release();
+    const done = await inFlight;
+    assert.equal(done.status, 200, JSON.stringify(done.data));
+    assert.equal(done.data.payment.tx, 'pinned-sig');
+    const dev = db.connFor('devnet').prepare('SELECT state, owner FROM specimens WHERE id = ?').get(target.id) as any;
+    assert.equal(dev.state, 'held');
+    assert.equal(dev.owner, lpAddr);
+    assert.equal((db.connFor('mainnet-beta').prepare('SELECT COUNT(*) n FROM reservations').get() as any).n, 0, 'nothing written on mainnet');
+    delete (globalThis as any).__srtestlive;
+    await ok('POST', '/api/admin/network/switch', { network: 'devnet', password: 'test-password' }, 'admin');
+    console.log('networks ok');
+  }
   console.log('ALL OK');
 } finally {
   server.close();

@@ -6,7 +6,7 @@ import crypto from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Achievement, Activity, Profile, RockType } from '../shared/types.ts';
 import { CATEGORY_NAME } from '../shared/rules.ts';
-import { all, get, now, run, tx } from './db.ts';
+import { activeNetwork, all, get, now, run, tx } from './db.ts';
 import { DAY, WALLET_COOKIE, newSession, sessionAge, touchWallet, verifyWalletSignature } from './auth.ts';
 import { createWallet, custodialOf, faucetAt, markExported, markFaucet, secretOf } from './custody.ts';
 import { b58encode, fail, str } from './util.ts';
@@ -223,7 +223,7 @@ export function activityOf(address: string): Activity[] {
 
 /* ---------- the account's own Solana wallet ---------- */
 
-const CLUSTER = () => (process.env.CHAIN === 'simulated' ? 'simulated' : process.env.SOLANA_CLUSTER || 'devnet');
+const CLUSTER = () => (process.env.CHAIN === 'simulated' ? 'simulated' : activeNetwork());
 const FAUCET_EVERY = 6 * 3600e3;
 const withTimeout = <T>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('The Solana network did not answer in time')), ms))]);
 const exportAllowed = () => CLUSTER() !== 'mainnet-beta' || process.env.ALLOW_KEY_EXPORT === '1';
@@ -236,14 +236,18 @@ export async function walletInfo(address: string) {
   const own = pk ?? address;
   const u = userRow(address);
   const cluster = CLUSTER();
-  let balance: number | null = null, error: string | null = null;
+  let balance: number | null = null, usdc: number | null = null, error: string | null = null;
   if (cluster !== 'simulated') {
-    try { const sol = await import('./solana.ts'); balance = await withTimeout(sol.balanceOf(own), 8000); } catch (e: any) { error = String(e?.message ?? e).slice(0, 200); }
+    try {
+      const sol = await import('./solana.ts');
+      [balance, usdc] = await withTimeout(Promise.all([sol.balanceOf(own), sol.tokenBalance(own, sol.USDC_MINT[activeNetwork()])]), 9000);
+    } catch (e: any) { error = String(e?.message ?? e).slice(0, 200); }
   }
   const last = pk ? faucetAt(address) : null;
   const next = last ? Date.parse(last) + FAUCET_EVERY : 0;
   return {
-    address: own, custodial: !!pk, cluster, balance_sol: balance, error,
+    address: own, custodial: !!pk, cluster, balance_sol: balance, balance_usdc: usdc, error,
+    payments: (globalThis as unknown as { __srpaylive?: () => boolean }).__srpaylive?.() ? 'live' : 'simulated',
     nfts_on_chain: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE nft_owner = ? AND mint IS NOT NULL AND state IN ('held', 'redeeming')", own)!.n,
     nfts_pending: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE owner = ? AND mint_status = 'pending'", address)!.n,
     linked_wallet: u?.linked_wallet ?? null,

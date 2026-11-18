@@ -2,33 +2,39 @@
 // demo sign-up). New accounts use the wallet's address as their account address; accounts made before
 // this existed get a wallet linked to their old address. NFTs are minted straight to it.
 //
-// The private key is kept by the server, encrypted with AES-256-GCM. The encryption key is
-// CUSTODY_KEY (32 bytes, base64 or hex) or data/custody-key.bin, generated on first start. Back up the
-// data directory: without that key the wallets cannot be used. The holder can export their key
+// The private key is kept by the server, encrypted with AES-256-GCM. The encryption key per network:
+// CUSTODY_KEY (devnet) / CUSTODY_KEY_MAINNET (32 bytes, base64 or hex), else custody-key.bin in that
+// network's data folder, generated on first use. Back up the data directory: without that key the
+// wallets cannot be used. The treasury and escrow wallets are kept the same way (owners sys:treasury,
+// sys:escrow). The holder can export their key
 // (password or a fresh sign-in required; refused on mainnet unless ALLOW_KEY_EXPORT=1).
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { DATA_DIR, all, get, now, run } from './db.ts';
+import { activeNetwork, all, get, netDir, now, run, type Network } from './db.ts';
 import { b58encode, fail } from './util.ts';
 
 interface CustodyRow { owner: string; pubkey: string; secret_enc: string; created_at: string; faucet_at: string | null; exported_at: string | null }
 
-const g = globalThis as unknown as { __srcustodykey?: Buffer };
+const g = globalThis as unknown as { __srcustodykeys?: Map<Network, Buffer> };
 
 function masterKey(): Buffer {
-  if (g.__srcustodykey) return g.__srcustodykey;
-  const env = process.env.CUSTODY_KEY?.trim();
+  const n = activeNetwork();
+  const keys = (g.__srcustodykeys ??= new Map());
+  const hit = keys.get(n);
+  if (hit) return hit;
+  const env = (n === 'mainnet-beta' ? process.env.CUSTODY_KEY_MAINNET : process.env.CUSTODY_KEY)?.trim();
   let key: Buffer;
   if (env) {
     key = /^[0-9a-f]{64}$/i.test(env) ? Buffer.from(env, 'hex') : Buffer.from(env, 'base64');
-    if (key.length !== 32) throw new Error('CUSTODY_KEY must be 32 bytes (64 hex characters or base64)');
+    if (key.length !== 32) throw new Error('The custody key must be 32 bytes (64 hex characters or base64)');
   } else {
-    const file = path.join(DATA_DIR, 'custody-key.bin');
+    const file = path.join(netDir(n), 'custody-key.bin');
     if (!fs.existsSync(file)) fs.writeFileSync(file, crypto.randomBytes(32), { mode: 0o600 });
     key = fs.readFileSync(file);
   }
-  return (g.__srcustodykey = key);
+  keys.set(n, key);
+  return key;
 }
 
 /** A fresh ed25519 keypair in Solana's format: the 64-byte secret is seed + public key. */

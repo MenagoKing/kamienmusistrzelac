@@ -57,6 +57,19 @@ GOOGLE_CLIENT_ID=
 EOF
   echo "    Admin password: $ADMIN_PW   (also in $APP/.env)"
 fi
+# Mainnet settings (the site starts on devnet; switch in Admin > Network). The encryption key for
+# collectors' mainnet wallets lives here, apart from the data folder: back up this file.
+if ! grep -q '^CUSTODY_KEY_MAINNET=' "$APP/.env" && [ ! -f "$DATA/mainnet/custody-key.bin" ]; then
+  cat >> "$APP/.env" <<EOF
+
+# --- mainnet (see README: Devnet and mainnet) ---
+CUSTODY_KEY_MAINNET=$(openssl rand -hex 32)
+# A dedicated RPC for mainnet (Helius, Triton, QuickNode). The public one is rate-limited.
+# SOLANA_RPC_MAINNET=https://mainnet.helius-rpc.com/?api-key=...
+# Set PUBLIC_URL to your https domain before minting real NFTs, e.g. PUBLIC_URL=https://spacerocks.example
+EOF
+  echo "    Generated CUSTODY_KEY_MAINNET in $APP/.env (back up this file)"
+fi
 chmod 600 "$APP/.env"
 chown -R spacerocks:spacerocks "$APP" "$DATA"
 

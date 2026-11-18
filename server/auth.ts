@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { DATA_DIR, get, now, run } from './db.ts';
+import { DATA_DIR, ctl, get, now, run } from './db.ts';
 import { getRules } from './store.ts';
 import { b58decode, fail, randomHex } from './util.ts';
 import { createWallet } from './custody.ts';
@@ -28,8 +28,16 @@ function setCookie(res: ServerResponse, name: string, value: string, maxAgeMs: n
   res.setHeader('Set-Cookie', [...(Array.isArray(prev) ? prev : prev ? [String(prev)] : []), c]);
 }
 
+// Collector sessions belong to the active network (accounts differ per network); admin sessions are
+// global (control database), so switching networks keeps the admin signed in.
 export function newSession(res: ServerResponse, cookie: string, subject: string, role: 'wallet' | 'admin', ttl: number) {
   const token = randomHex(32);
+  if (role === 'admin') {
+    ctl.prepare('INSERT INTO admin_sessions (token, subject, expires_at, created_at) VALUES (?, ?, ?, ?)').run(token, subject, Date.now() + ttl, Date.now());
+    ctl.prepare('DELETE FROM admin_sessions WHERE expires_at < ?').run(Date.now());
+    setCookie(res, cookie, token, ttl);
+    return;
+  }
   run('INSERT INTO sessions (token, subject, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?)', token, subject, role, Date.now() + ttl, Date.now());
   run('DELETE FROM sessions WHERE expires_at < ?', Date.now());
   setCookie(res, cookie, token, ttl);
@@ -38,13 +46,17 @@ export function newSession(res: ServerResponse, cookie: string, subject: string,
 function session(req: IncomingMessage, cookie: string, role: string) {
   const t = cookies(req)[cookie];
   if (!t) return null;
+  if (role === 'admin') {
+    const a = ctl.prepare('SELECT * FROM admin_sessions WHERE token = ?').get(t) as { subject: string; expires_at: number } | undefined;
+    return a && a.expires_at > Date.now() ? a.subject : null;
+  }
   const s = get<{ subject: string; role: string; expires_at: number }>('SELECT * FROM sessions WHERE token = ?', t);
   return s && s.role === role && s.expires_at > Date.now() ? s.subject : null;
 }
 
 export function endSession(req: IncomingMessage, res: ServerResponse, cookie: string) {
   const t = cookies(req)[cookie];
-  if (t) run('DELETE FROM sessions WHERE token = ?', t);
+  if (t) { run('DELETE FROM sessions WHERE token = ?', t); ctl.prepare('DELETE FROM admin_sessions WHERE token = ?').run(t); }
   setCookie(res, cookie, '', 0);
 }
 
@@ -132,6 +144,12 @@ export function walletDemo(res: ServerResponse) {
 let cachedHash: string | null = null;
 
 /** ADMIN_PASSWORD from the environment, else a random one generated once into data/admin-password.txt. */
+/** True if this is the admin password (for actions that ask for it again). */
+export function verifyAdminPassword(pw: string) {
+  const given = crypto.createHash('sha256').update(pw).digest();
+  return crypto.timingSafeEqual(given, Buffer.from(adminHash(), 'hex'));
+}
+
 function adminHash() {
   if (cachedHash) return cachedHash;
   let pw = process.env.ADMIN_PASSWORD;

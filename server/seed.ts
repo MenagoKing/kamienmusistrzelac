@@ -4,7 +4,9 @@
 // Admin > Settings > "Reset demo data" runs reseed().
 import type { Band, RockType } from '../shared/types.ts';
 import { DEFAULT_RULES, bandOf } from '../shared/rules.ts';
-import { all, db, get, now, run, tx } from './db.ts';
+import { activeNetwork, all, db, get, now, run, tx } from './db.ts';
+import { saveRules } from './store.ts';
+import { fail } from './util.ts';
 import { addSlots, openPack } from './ops.ts';
 import { migrateDealerModel } from './sources.ts';
 import { backfillWallets } from './custody.ts';
@@ -138,6 +140,7 @@ export function seed() {
 }
 
 export function ensureSeeded() {
+  if (activeNetwork() === 'mainnet-beta') return prepareMainnet();
   if (!get('SELECT 1 FROM specimens LIMIT 1')) seed();
   topUpMarket();
   migrateDealerModel();
@@ -146,7 +149,16 @@ export function ensureSeeded() {
   run("UPDATE series SET ends_at = '2026-12-31T23:59:59Z' WHERE id = 'MW' AND ends_at IS NULL");
 }
 
+/** Mainnet: no sample data, no demo wallet, no sample notice. Real inventory is added by the admin. */
+function prepareMainnet() {
+  if (!get("SELECT 1 FROM settings WHERE key = 'rules'")) saveRules({ ...DEFAULT_RULES, demo_wallet: false, sample_notice: false });
+  run("INSERT OR IGNORE INTO settings (key, value) VALUES ('dealer_v1', '1')");
+  run("INSERT OR IGNORE INTO settings (key, value) VALUES ('nft_v1', '1')");
+  backfillWallets(queueTransfer);
+}
+
 export function reseed() {
+  if (activeNetwork() === 'mainnet-beta') fail(403, 'Mainnet data is real: it can never be reset. Switch to devnet to reset sample data.');
   const tables = all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('sessions', 'custody', 'sqlite_sequence')").map(t => t.name);
   tx(() => { for (const t of tables) db.exec(`DELETE FROM ${t}`); });
   seed();

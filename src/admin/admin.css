@@ -268,3 +268,19 @@ i.b-floor{background:#7D7166}i.b-par{background:#D6CABC}i.b-hit{background:#F08A
 .dealer-card.late{border-color:rgba(242,160,138,.5);background:rgba(227,105,58,.06)}
 .late-t{color:var(--red)}
 .badge.red{color:var(--red)}
+
+/* network */
+.netpill{display:block;margin:-4px 0 14px;padding:7px 10px;border-radius:10px;border:1px solid rgba(159,227,255,.35);color:#9fe3ff;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;text-decoration:none;text-align:center}
+.netpill.main{border-color:rgba(242,160,138,.6);color:#1A0E08;background:linear-gradient(90deg,#F08A5D,#E8C27A)}
+.netc.on{border-color:rgba(159,227,255,.45)}.netc.main.on{border-color:rgba(240,138,93,.6)}
+.nstats{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11px;color:var(--soft);margin:10px 0 4px}.nstats b{color:var(--ink);font-weight:500}
+.nchk{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.nchk li{display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.nchk li i{font-style:normal;width:20px;height:20px;flex:none;display:grid;place-items:center;border-radius:50%;font-size:11px}
+.nchk li.ok i{background:rgba(158,211,154,.15);color:var(--green)}.nchk li.warn i{background:rgba(232,194,122,.15);color:var(--amber)}.nchk li.bad i{background:rgba(242,160,138,.18);color:var(--red)}
+.nchk li.bad{border-color:rgba(242,160,138,.4)}
+.nchk li div{display:grid;gap:3px}.nchk li small{color:var(--mute);font-size:12px;word-break:break-word}
+.nwals{display:grid;gap:10px}
+.nwal{display:grid;gap:6px;padding:12px;border:1px solid var(--line);border-radius:12px}
+.nwal>div:first-child{display:grid;gap:2px}.nwal code{font-size:11.5px;word-break:break-all;color:var(--soft)}
+.nwal-b{display:flex;gap:16px;font-size:12px}.nwal-a{display:flex;gap:8px;flex-wrap:wrap}

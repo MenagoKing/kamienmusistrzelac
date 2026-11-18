@@ -41,9 +41,13 @@ export function Spinner({ label }: { label: string }) {
   return <span className="spin" role="status" aria-label={label} />;
 }
 
-/** Explorer-style short signature, marked simulated while the chain adapter is simulated. */
+/** Explorer-style short signature: marked simulated, queued (a payout on its way), or linked to the explorer. */
 export function TxLine({ tx, simulated, label = 'Transaction' }: { tx: string; simulated?: boolean; label?: string }) {
+  const { data } = useApp();
+  if (!tx) return <div className="txl mono"><span>{label}</span><code>queued</code><em>on its way to your wallet</em></div>;
+  const net = data.chain.cluster;
+  const href = !simulated && net !== 'simulated' ? `https://explorer.solana.com/tx/${tx}${net === 'mainnet-beta' ? '' : `?cluster=${net}`}` : null;
   return (
-    <div className="txl mono"><span>{label}</span><code title={tx}>{tx.slice(0, 6)}…{tx.slice(-6)}</code>{simulated && <em>simulated</em>}</div>
+    <div className="txl mono"><span>{label}</span>{href ? <a href={href} target="_blank" rel="noreferrer" title={tx}>{tx.slice(0, 6)}…{tx.slice(-6)} ↗</a> : <code title={tx}>{tx.slice(0, 6)}…{tx.slice(-6)}</code>}{simulated && <em>simulated</em>}</div>
   );
 }

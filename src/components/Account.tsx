@@ -9,6 +9,7 @@ import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
 import { Media } from './Media';
 import { NftLine, Rarity } from './Checkout';
+import { payNote } from './Funds';
 
 export const holdingReveal = (h: Holding): PackReveal => ({
   pull_id: null, series_id: null, band: h.band ?? 'par', pack_price_usd: h.paid_usd ?? h.vault_value_usd ?? 0, vault_value_usd: h.vault_value_usd ?? 0,
@@ -189,7 +190,7 @@ function SourcedRedeem({ specimen, reservation }: { specimen: Holding | PackReve
           )}
           {err && <p className="err" role="alert">{err}</p>}
           <button className="btn wide" type="submit" disabled={busy || !quote || quoting}>{busy ? <><Spinner label="Working" />Working…</> : !quote ? 'Choose a country to see the cost' : refundAll ? `Refund ${usd(reservation.paid_usd)}` : `Burn and ship for ${usd(total)}`}</button>
-          <p className="fine">The rock is bought from the dealer with the escrow only after the NFT is burned, and ordered within 48 hours. Only countries we can ship to are listed. Payments on this preview are simulated.</p>
+          <p className="fine">The rock is bought from the dealer with the escrow only after the NFT is burned, and ordered within 48 hours. Only countries we can ship to are listed. {payNote(data)}</p>
         </form>
       )}
     </Overlay>

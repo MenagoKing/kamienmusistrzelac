@@ -4,7 +4,7 @@
 //
 // Where the NFT goes: the collector's linked Solana wallet if they linked one, else their account's
 // own wallet (server/custody.ts), else the address they signed in with.
-import { all, get, now, run } from './db.ts';
+import { activeNetwork, all, get, now, pinNetwork, run } from './db.ts';
 import { getRules, specimenRow } from './store.ts';
 import { randomB58 } from './util.ts';
 
@@ -78,7 +78,7 @@ async function runJob(j: Job) {
   if (j.action !== 'burn' && (await sol.balanceSol()) < 0.004) throw Object.assign(new Error(`The vault authority ${sol.authority()} has no SOL. Fund it at https://faucet.solana.com (devnet).`), { wait: true });
   if (j.action === 'mint') {
     if (!['held', 'redeeming'].includes(s.state)) return { skip: 'no longer held' };
-    const r = await sol.mintAsset({ name: `${s.name} ${s.id}`, uri: `${PUBLIC_URL()}/api/nft/${s.id}.json`, owner: j.owner!, attributes: attributesOf(s.id), royaltyBps: Math.round(getRules().royalty * 10000) });
+    const r = await sol.mintAsset({ name: `${s.name} ${s.id}`, uri: `${PUBLIC_URL()}/api/nft/${activeNetwork() === 'mainnet-beta' ? 'mainnet' : 'devnet'}/${s.id}.json`, owner: j.owner!, attributes: attributesOf(s.id), royaltyBps: Math.round(getRules().royalty * 10000) });
     run("UPDATE specimens SET mint = ?, mint_tx = ?, nft_owner = ?, mint_status = 'minted' WHERE id = ?", r.asset, r.signature, j.owner, s.id);
     return { signature: r.signature, asset: r.asset };
   }
@@ -94,7 +94,10 @@ async function runJob(j: Job) {
   return { signature };
 }
 
-async function tick() {
+/** One worker run, pinned to the network that is active when it starts. */
+const tick = () => pinNetwork(tickOn);
+
+async function tickOn() {
   if (g.__srbusy) return;
   g.__srbusy = true;
   try {
@@ -149,7 +152,7 @@ export async function chainStatus() {
   const sol = await import('./solana.ts');
   let balance: number | null = null, error = '';
   try { balance = await sol.balanceSol(); } catch (e: any) { error = String(e?.message ?? e).slice(0, 200); }
-  return { mode: 'solana', cluster: sol.CLUSTER, rpc: sol.RPC, authority: sol.authority(), balance, counts, minted, jobs, note: g.__srnote || error, faucet: 'https://faucet.solana.com' };
+  return { mode: 'solana', cluster: sol.cluster(), rpc: sol.rpcUrl().replace(/(api[-_]?key=)[^&]+/i, '$1…'), authority: sol.authority(), balance, counts, minted, jobs, note: g.__srnote || error, faucet: sol.cluster() === 'mainnet-beta' ? null : 'https://faucet.solana.com' };
 }
 
 export async function chainAirdrop() {
@@ -165,7 +168,7 @@ export function retryFailed() {
   return { ok: true };
 }
 
-export const chainCluster = () => (SIMULATED ? 'simulated' : process.env.SOLANA_CLUSTER || 'devnet');
+export const chainCluster = () => (SIMULATED ? 'simulated' : activeNetwork());
 
 /** One-time: specimens minted by the old simulated adapter get a real NFT (collectors) or none (sample data). */
 export function migrateSimulatedMints() {

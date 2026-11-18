@@ -11,6 +11,7 @@ import { Vault } from './components/Vault';
 import { After } from './components/After';
 import { Faq, Footer, Join, Token } from './components/Closing';
 import { Toasts } from './components/Overlay';
+import { NetBadge } from './components/Funds';
 import { DialogHost } from './components/Dialogs';
 
 function Page() {
@@ -40,6 +41,7 @@ function Page() {
       <Footer />
       <DialogHost d={dialog} />
       <Toasts />
+      <NetBadge />
     </>
   );
 }

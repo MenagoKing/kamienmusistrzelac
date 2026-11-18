@@ -4,6 +4,7 @@ import { callsign, useApp, type Dialog } from '../lib/store';
 import { signOut } from '../lib/wallet';
 import { AvatarStill, AvatarTurn, ROCK_LABEL, avatarRock } from './Avatar';
 import { Spinner } from './Overlay';
+import { payNote } from './Funds';
 
 const rnd = () => Math.floor(Math.random() * 100000);
 
@@ -103,7 +104,7 @@ export function AuthDialog({ mode: initial = 'register', then }: { mode?: 'login
 
           <div className="or mono"><span>or</span></div>
           <GoogleButton clientId={data.rules.google_client_id} onCredential={google} busy={busy === 'google'} onError={setErr} />
-          <p className="fine auth-fine">Every specimen you get is minted to you as an NFT on Solana. Payments on this preview are simulated: nothing is charged.</p>
+          <p className="fine auth-fine">Every account gets its own Solana wallet; every specimen you get is minted to it as an NFT. {payNote(data)}</p>
         </div>
       </div>
     </div>

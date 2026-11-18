@@ -100,7 +100,7 @@ export function Settings() {
 
         <Card title="Chain and site">
           <div className="form-grid">
-            <Field label="SOL price for quotes, USD" hint="Simulated chain. A live price feed replaces this on mainnet."><input type="number" step="0.01" value={r.sol_usd} onChange={e => set({ sol_usd: Number(e.target.value) })} /></Field>
+            <Field label="SOL price fallback, USD" hint="SOL quotes use a live 5-minute average from Jupiter; this is used only when it is unavailable."><input type="number" step="0.01" value={r.sol_usd} onChange={e => set({ sol_usd: Number(e.target.value) })} /></Field>
           </div>
           <div className="tgls">
             <Toggle checked={r.demo_wallet} onChange={v => set({ demo_wallet: v })} label="Demo wallet" hint="Lets visitors try the full flow without a wallet extension. Turn off at launch." />

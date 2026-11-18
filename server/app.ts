@@ -2,27 +2,32 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { UPLOAD_DIR, get, now, run } from './db.ts';
+import { UPLOAD_DIR, activeNetwork, get, now, onNetwork, pinNetwork, run, type Network } from './db.ts';
 import { HttpError, fail, randomHex, str } from './util.ts';
 import { ADMIN_COOKIE, WALLET_COOKIE, adminLogin, adminOf, endSession, requireAdmin, requireWallet, walletDemo, walletNonce, walletOf, walletVerify } from './auth.ts';
 import { buyMarket, openPack, redeem, sellBack, audit } from './ops.ts';
 import * as A from './admin.ts';
 import { getRules, holdingsOf, pageData, redemptionOf, seriesProof, seriesRow, specimenRow, toPublic, toReveal, toSeries, vaultRegister } from './store.ts';
 import { all } from './db.ts';
-import { ensureSeeded, reseed } from './seed.ts';
+import { reseed } from './seed.ts';
 import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile, walletExport, walletFaucet, walletInfo } from './accounts.ts';
 import { adminListings, buyListing, cancelListing, listForSale, listingsOf } from './market.ts';
 import { publicListings } from './store.ts';
 import * as SRC from './sources.ts';
-import { startTokenSampler, tokenStatus } from './token.ts';
+import { startSolPrice, startTokenSampler, tokenStatus } from './token.ts';
 import { chainAirdrop, chainStatus, drain, migrateSimulatedMints, nftOwnerOf, queueTransfer, retryFailed, startWorker } from './nft.ts';
 import { googleLogin } from './google.ts';
+import { payoutsList, retryPayout, startPayoutWorker, withPayment, withdrawTreasury } from './chain.ts';
+import { configureNetwork, networkStatus, prepareNetwork, switchNetwork } from './network.ts';
+import { verifyAdminPassword } from './auth.ts';
 import { nftJson, nftSvg, saveShareImage, sharePage } from './nftmeta.ts';
 
-ensureSeeded();
+prepareNetwork();
 migrateSimulatedMints();
 startWorker();
+startPayoutWorker();
 startTokenSampler();
+startSolPrice();
 
 type Ctx = { req: IncomingMessage; res: ServerResponse; params: string[]; query: URLSearchParams; body: any };
 type Handler = (c: Ctx) => unknown;
@@ -69,7 +74,7 @@ on('GET', '/api/me', ({ req }) => {
 on('POST', '/api/market/:id/buy', ({ req, params, body }) => {
   const wallet = requireWallet(req);
   const s = specimenRow(params[0]) ?? fail(404, 'Specimen not found');
-  return s.dealer_id ? SRC.reserve(wallet, s.id, body) : buyMarket(wallet, s.id, body?.currency, body?.expected_price_usd);
+  return withPayment(() => (s.dealer_id ? SRC.reserve(wallet, s.id, body) : buyMarket(wallet, s.id, body?.currency, body?.expected_price_usd)));
 });
 on('GET', '/api/token', () => tokenStatus());
 
@@ -80,17 +85,20 @@ on('POST', '/api/reservations/:id/refund', ({ req, params }) => SRC.refundReserv
 on('GET', '/api/reservations/:id/replacements', ({ req, params }) => SRC.replacementOptions(requireWallet(req), params[0]).map(id => toPublic(specimenRow(id)!)));
 on('POST', '/api/reservations/:id/replace', ({ req, params, body }) => SRC.replaceReservation(requireWallet(req), params[0], String(body?.specimen_id ?? '')));
 on('POST', '/api/reservations/:id/redeem-quote', ({ req, params, body }) => SRC.redeemQuote(requireWallet(req), params[0], body?.country));
-on('POST', '/api/reservations/:id/redeem', ({ req, params, body }) => SRC.redeemReservation(requireWallet(req), params[0], body));
-on('POST', '/api/series/:id/open', ({ req, params, body }) => openPack(requireWallet(req), params[0], body?.currency, body?.client_seed));
+on('POST', '/api/reservations/:id/redeem', ({ req, params, body }) => { const w = requireWallet(req); return withPayment(() => SRC.redeemReservation(w, params[0], body)); });
+on('POST', '/api/series/:id/open', ({ req, params, body }) => { const w = requireWallet(req); return withPayment(() => openPack(w, params[0], body?.currency, body?.client_seed)); });
 on('POST', '/api/specimens/:id/sell-back', ({ req, params }) => sellBack(requireWallet(req), params[0]));
-on('POST', '/api/specimens/:id/redeem', ({ req, params, body }) => redeem(requireWallet(req), params[0], body));
+on('POST', '/api/specimens/:id/redeem', ({ req, params, body }) => { const w = requireWallet(req); return withPayment(() => redeem(w, params[0], body)); });
 
 /* ---------- accounts ---------- */
 
 on('POST', '/api/auth/register', ({ req, res, body }) => register(req, res, body));
 on('POST', '/api/auth/login', ({ req, res, body }) => login(req, res, body));
 on('POST', '/api/auth/google', ({ req, res, body }) => googleLogin(req, res, body));
-on('GET', '/api/nft/:id', ({ req, params }) => nftJson(req, params[0]));
+// NFT metadata: /api/nft/<devnet|mainnet>/<id>.json, always read from that network's data (old links: devnet).
+const netOf = (slug: string): Network => (slug === 'mainnet' ? 'mainnet-beta' : slug === 'devnet' ? 'devnet' : fail(404, 'Unknown network'));
+on('GET', '/api/nft/:id', ({ req, params }) => onNetwork('devnet', () => nftJson(req, params[0])));
+on('GET', '/api/nft/:net/:id', ({ req, params }) => { const n = netOf(params[0]); return onNetwork(n, () => nftJson(req, params[1])); });
 on('POST', '/api/share-image', ({ req, body }) => { requireWallet(req); return saveShareImage(String(body?.specimen_id ?? ''), body?.data); });
 on('POST', '/api/specimens/:id/withdraw', ({ req, params }) => {
   const me = requireWallet(req);
@@ -115,8 +123,9 @@ on('POST', '/api/me/wallet/export', ({ req, body }) => walletExport(req, require
 on('GET', '/api/listings', ({ req }) => publicListings(walletOf(req)));
 on('POST', '/api/specimens/:id/list', ({ req, params, body }) => listForSale(requireWallet(req), params[0], body));
 on('POST', '/api/listings/:id/cancel', ({ req, params }) => cancelListing(requireWallet(req), params[0]));
-on('POST', '/api/listings/:id/buy', ({ req, params, body }) => {
-  const r = buyListing(requireWallet(req), params[0], body?.currency);
+on('POST', '/api/listings/:id/buy', async ({ req, params, body }) => {
+  const w = requireWallet(req);
+  const r = await withPayment(() => buyListing(w, params[0], body?.currency));
   const s = r.specimen;
   return {
     payment: r.payment, mint: s.mint, listing: r.listing,
@@ -128,7 +137,7 @@ on('POST', '/api/listings/:id/buy', ({ req, params, body }) => {
 
 on('POST', '/api/admin/login', ({ req, res, body }) => adminLogin(req, res, body));
 on('POST', '/api/admin/logout', ({ req, res }) => { endSession(req, res, ADMIN_COOKIE); return { ok: true }; });
-on('GET', '/api/admin/me', ({ req }) => ({ admin: !!adminOf(req) }));
+on('GET', '/api/admin/me', ({ req }) => ({ admin: !!adminOf(req), network: activeNetwork(), payments: (globalThis as unknown as { __srpaylive?: () => boolean }).__srpaylive?.() ? 'live' : 'simulated' }));
 
 const admin = (method: string, pattern: string, h: (c: Ctx, actor: string) => unknown) =>
   on(method, '/api/admin' + pattern, c => h(c, requireAdmin(c.req)));
@@ -152,6 +161,17 @@ admin('POST', '/dealers/:id/import', ({ params, body }, a) => SRC.importOffers(a
 admin('GET', '/escrow', () => SRC.escrowOverview());
 admin('GET', '/escrow/:id/events', ({ params }) => SRC.escrowEvents(params[0]));
 admin('GET', '/token', () => tokenStatus());
+admin('GET', '/network', () => networkStatus());
+admin('POST', '/network/switch', ({ body }, a) => switchNetwork(a, body));
+admin('PUT', '/network/:id', ({ params, body }, a) => configureNetwork(a, params[0], body));
+admin('GET', '/payouts', ({ query }) => payoutsList(query.get('status')));
+admin('POST', '/payouts/:id/retry', ({ params }) => retryPayout(Number(params[0])));
+admin('POST', '/treasury/withdraw', ({ body }, a) => {
+  if (!verifyAdminPassword(String(body?.password ?? ''))) fail(401, 'Wrong admin password');
+  const r = withdrawTreasury({ to: String(body?.to ?? '').trim(), currency: body?.currency, amount: Number(body?.amount) });
+  audit(a, 'treasury.withdraw', String(body?.to ?? ''), { currency: body?.currency, amount: Number(body?.amount), network: activeNetwork() });
+  return r;
+});
 
 admin('GET', '/series', () => all<any>('SELECT * FROM series ORDER BY sort, id').map(s => ({ ...toSeries(s), sort: s.sort })));
 admin('POST', '/series', ({ body }, a) => A.createSeries(a, body));
@@ -234,8 +254,12 @@ function serveUpload(res: ServerResponse, pathname: string) {
   fs.createReadStream(file).pipe(res);
 }
 
-/** Handles /api/* and /uploads/*. Returns false for anything else. */
-export async function handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+/** Handles /api/* and /uploads/*. Returns false for anything else. Each request runs on one network from start to end. */
+export function handle(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
+  return pinNetwork(() => handleOn(req, res));
+}
+
+async function handleOn(req: IncomingMessage, res: ServerResponse): Promise<boolean> {
   const url = new URL(req.url ?? '/', 'http://local');
   if (url.pathname.startsWith('/uploads/')) { serveUpload(res, url.pathname); return true; }
   if (/^\/s\/[\w-]+$/.test(url.pathname)) {
@@ -244,8 +268,10 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
     res.end(html ?? 'Not found');
     return true;
   }
-  if (/^\/api\/nft\/[\w-]+\.svg$/.test(url.pathname)) {
-    try { const svg = nftSvg(url.pathname.split('/').pop()!); res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' }); res.end(svg); } catch { res.writeHead(404); res.end(); }
+  if (/^\/api\/nft\/(?:(?:devnet|mainnet)\/)?[\w-]+\.svg$/.test(url.pathname)) {
+    const parts = url.pathname.split('/');
+    const n: Network = parts.length === 5 && parts[3] === 'mainnet' ? 'mainnet-beta' : 'devnet';
+    try { const svg = onNetwork(n, () => nftSvg(parts.pop()!)); res.writeHead(200, { 'Content-Type': 'image/svg+xml', 'Cache-Control': 'public, max-age=3600' }); res.end(svg); } catch { res.writeHead(404); res.end(); }
     return true;
   }
   if (!url.pathname.startsWith('/api/')) return false;

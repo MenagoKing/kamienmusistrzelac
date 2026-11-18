@@ -11,10 +11,11 @@
 //   release  to the ops wallet, only after the holder burned the NFT by redeeming
 // There is no admin endpoint that takes escrow money.
 //
-// Escrow is kept by the app for now (payments are simulated); the on-chain program comes next.
+// With live payments (server/chain.ts) the escrow is a real wallet (sys:escrow): the rock price is paid
+// into it at purchase and leaves it only by the moves above. An on-chain escrow program can replace it.
 import type { Currency, PackReveal, RedeemQuote, Redemption, Reservation, TxResult } from '../shared/types.ts';
 import { marketPrice, tokenPrice } from '../shared/rules.ts';
-import { chain } from './chain.ts';
+import { SYS, chain } from './chain.ts';
 import { all, get, now, run, tx } from './db.ts';
 import { audit, ledger } from './ops.ts';
 import { queueBurn, queueMint } from './nft.ts';
@@ -164,7 +165,7 @@ export function reserve(wallet: string, id: string, body: any): { reveal: PackRe
     const tokenAmount = currency === 'TOKEN' ? tokenAmountFor(paid) : undefined;
     const rock = cents(src.price!);
     const commission = cents(paid - rock);
-    const payment = chain.charge({ from: wallet, usd: paid, currency, solUsd: rules.sol_usd, memo: `reserve ${id}`, tokenAmount });
+    const payment = chain.charge({ from: wallet, usd: paid, currency, solUsd: rules.sol_usd, memo: `reserve ${id}`, tokenAmount, escrowUsd: rock });
 
     run("UPDATE specimens SET state = 'held', owner = ?, acquired_via = 'market', acquired_at = ?, paid_usd = ?, sold_back = 0, updated_at = ? WHERE id = ?", wallet, now(), paid, now(), id);
     const rid = uid('rs');
@@ -198,7 +199,7 @@ export function cancelReservation(wallet: string, resId: string) {
     const s = specimenRow(r.specimen_id)!;
     if (s.owner !== wallet || s.state !== 'held') fail(409, 'This specimen is not with you');
     const e = escrowOf(r.id) ?? fail(409, 'No escrow for this reservation');
-    const payout = chain.payout({ to: wallet, usd: e.amount_usd, memo: `cancel ${s.id}` });
+    const payout = chain.payout({ to: wallet, usd: e.amount_usd, memo: `cancel ${s.id}`, from: 'escrow' });
     escrowEvent(e, 'refund', e.amount_usd, wallet, payout.tx, 'cancel');
     run("UPDATE escrows SET status = 'refunded', closed_at = ? WHERE id = ?", now(), e.id);
     run("UPDATE reservations SET status = 'cancelled', updated_at = ?, closed_at = ? WHERE id = ?", now(), now(), r.id);
@@ -242,14 +243,15 @@ function refundAll(r: ResRow, wallet: string, reason: string) {
   const e = escrowOf(r.id);
   const escrowPart = e && e.status === 'locked' ? e.amount_usd : 0;
   const fromOps = cents(r.paid_usd - escrowPart);
-  const payout = chain.payout({ to: wallet, usd: r.paid_usd, memo: `refund ${s.id}` });
+  const payout = escrowPart > 0 ? chain.payout({ to: wallet, usd: escrowPart, memo: `refund ${s.id}`, from: 'escrow' }) : chain.payout({ to: wallet, usd: fromOps, memo: `refund ${s.id}` });
+  if (escrowPart > 0 && fromOps > 0) chain.payout({ to: wallet, usd: fromOps, memo: `refund commission ${s.id}` });
   if (e && e.status === 'locked') {
     escrowEvent(e, 'refund', escrowPart, wallet, payout.tx, reason);
     run("UPDATE escrows SET status = 'refunded', closed_at = ? WHERE id = ?", now(), e.id);
   }
   run("UPDATE reservations SET status = 'refunded', updated_at = ?, closed_at = ? WHERE id = ?", now(), now(), r.id);
   release(s);
-  ledger('reservation_refund', { wallet, specimen_id: s.id, usd: -r.paid_usd, currency: 'USDC', amount: -payout.amount, tx: payout.tx, split: { escrow: escrowPart, commission_refunded: fromOps, reason } });
+  ledger('reservation_refund', { wallet, specimen_id: s.id, usd: -r.paid_usd, currency: 'USDC', amount: -r.paid_usd, tx: payout.tx || null, split: { escrow: escrowPart, commission_refunded: fromOps, reason } });
   return { refunded_usd: r.paid_usd, payout };
 }
 
@@ -281,7 +283,10 @@ export function replaceReservation(wallet: string, resId: string, newId: string)
     const e = escrowOf(r.id) ?? fail(409, 'No escrow for this reservation');
     const newRock = cents(n.dealer_price_usd!);
     const refund = cents(r.paid_usd - newPaid);
-    const payout = refund > 0 ? chain.payout({ to: wallet, usd: refund, memo: `replacement ${n.id}` }) : null;
+    const escrowBack = Math.min(refund, Math.max(0, cents(e.amount_usd - newRock)));
+    let payout = escrowBack > 0 ? chain.payout({ to: wallet, usd: escrowBack, memo: `replacement ${n.id}`, from: 'escrow' }) : null;
+    if (refund - escrowBack > 0.004) { const p2 = chain.payout({ to: wallet, usd: cents(refund - escrowBack), memo: `replacement ${n.id}` }); payout ??= p2; }
+    if (newRock > e.amount_usd + 0.004) chain.payout({ to: SYS.escrow, usd: cents(newRock - e.amount_usd), memo: `escrow top-up ${n.id}` });
     // the old specimen leaves; the new one is reserved with the same escrow
     const old = specimenRow(r.specimen_id)!;
     release(old);
@@ -349,11 +354,11 @@ export function redeemReservation(wallet: string, resId: string, body: any): { r
     const q = shippingQuote(dealerRow(s.dealer_id), address.country, current);
     const fee = cents(q.shipping + q.insurance);
     const charge = cents(fee + Math.max(0, delta));
-    const payment = chain.charge({ from: wallet, usd: charge, currency: body?.currency === 'SOL' ? 'SOL' : 'USDC', solUsd: rules.sol_usd, memo: `redeem ${s.id}` });
+    const payment = chain.charge({ from: wallet, usd: charge, currency: body?.currency === 'SOL' ? 'SOL' : 'USDC', solUsd: rules.sol_usd, memo: `redeem ${s.id}`, escrowUsd: Math.max(0, delta) });
     if (delta > 0) { escrowEvent(e, 'topup', delta, 'escrow', payment.tx, 'higher price at redemption'); run('UPDATE escrows SET amount_usd = amount_usd + ? WHERE id = ?', delta, e.id); }
     let refundTx: TxResult | null = null;
     if (delta < 0) {
-      refundTx = chain.payout({ to: wallet, usd: -delta, memo: `price difference ${s.id}` });
+      refundTx = chain.payout({ to: wallet, usd: -delta, memo: `price difference ${s.id}`, from: 'escrow' });
       escrowEvent(e, 'refund', -delta, wallet, refundTx.tx, 'lower price at redemption');
       run('UPDATE escrows SET amount_usd = amount_usd - ? WHERE id = ?', -delta, e.id);
       ledger('price_difference_refund', { wallet, specimen_id: s.id, usd: delta, currency: 'USDC', amount: delta, tx: refundTx.tx });
@@ -361,7 +366,8 @@ export function redeemReservation(wallet: string, resId: string, body: any): { r
     // the holder burns the NFT by redeeming; only now can the escrow go to the ops wallet
     queueBurn(s.id);
     const released = cents(e.amount_usd + delta);
-    escrowEvent(e, 'release', released, 'ops', null, 'released after the holder redeemed (NFT burned)');
+    const rel = chain.payout({ to: SYS.treasury, usd: released, memo: `escrow release ${s.id}`, from: 'escrow' });
+    escrowEvent(e, 'release', released, 'ops', rel.tx || null, 'released after the holder redeemed (NFT burned)');
     run("UPDATE escrows SET status = 'released', amount_usd = ?, closed_at = ? WHERE id = ?", released, now(), e.id);
     run("UPDATE reservations SET status = 'redeeming', updated_at = ? WHERE id = ?", now(), r.id);
     run("UPDATE specimens SET state = 'redeeming', updated_at = ? WHERE id = ?", now(), s.id);

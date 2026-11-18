@@ -191,3 +191,18 @@ html.locked{overflow:hidden}
 .sas-t{display:grid;gap:3px;min-width:0}.sas-t b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sas-t span{font-size:11px;color:var(--mute)}
 .sas-p{display:grid;gap:3px;justify-items:end;font-size:13px}.sas-p em{font-style:normal;font-size:10px;color:#BFE3BC}
 @media (max-width:520px){.pay.three{grid-template-columns:1fr}.pay.three button{flex-direction:row;align-items:center;justify-content:space-between}}
+
+/* ---------- real payments: wallet balance, top-up, devnet badge ---------- */
+.funds{display:grid;gap:6px;margin-top:12px;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02)}
+.funds>span{font-size:10px;color:var(--mute);letter-spacing:.1em;text-transform:uppercase}
+.funds b{font-weight:500;font-size:14px}
+.funds p{margin:0;font-size:13px;color:var(--soft)}
+.funds code{display:block;padding:9px 11px;border-radius:10px;border:1px solid var(--line);background:rgba(0,0,0,.25);font-size:12px;word-break:break-all}
+.funds .acts{margin-top:4px}
+.funds.short{border-color:rgba(242,160,138,.45);background:rgba(227,105,58,.06)}
+.funds.short p a{color:var(--dust2)}
+.txl a{color:var(--dust2);text-decoration:none}
+.netbadge{position:fixed;left:14px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:70;display:inline-flex;align-items:center;gap:8px;padding:7px 12px;border-radius:999px;border:1px solid rgba(159,227,255,.4);background:rgba(10,16,24,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);color:#9fe3ff;font-size:10px;letter-spacing:.1em;text-transform:uppercase;text-decoration:none}
+.netbadge i{width:6px;height:6px;border-radius:50%;background:#9fe3ff;box-shadow:0 0 8px #9fe3ff}
+@media (max-width:700px){.netbadge{left:10px;bottom:calc(10px + env(safe-area-inset-bottom,0px));font-size:9px;padding:6px 10px}}
+.mkt-empty b{display:block;font:400 32px/1.1 'Instrument Serif',serif;color:var(--ink);margin-bottom:8px}.mkt-empty p{margin:0}

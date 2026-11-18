@@ -73,6 +73,13 @@ export function Market() {
         <p>Every specimen is listed on its own, at one fixed price: the dealer’s price plus our commission. Sourced from independent certified dealers, purchased and shipped when you redeem. No draw, no luck: you see the exact rock you reserve, with its whole file.</p>
       </div>
 
+      {!vault.length && !collectors.length ? (
+        <div className="mkt-empty rv in">
+          <b>The first specimens are on their way.</b>
+          <p>Every rock is checked and documented before it is listed. Join the list at the bottom of the page and you will hear when they go live.</p>
+        </div>
+      ) : (
+      <>
       <div className="mfeat rv in">
         {featured.map(it => <Card key={it.key} it={it} big />)}
       </div>
@@ -103,6 +110,8 @@ export function Market() {
           )}
         </div>
       </div>
+      </>
+      )}
       <div className="rule mono rv"><span>Reserved for you the moment you pay</span><span>Rock price held in escrow until you redeem</span><span>Cancel any time: the rock’s price comes back</span></div>
     </section>
   );

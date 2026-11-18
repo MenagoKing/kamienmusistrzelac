@@ -12,6 +12,7 @@ import { BAND_NAME, shortAddr } from '../../shared/rules.ts';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Closing';
 import { Spinner, Toasts } from '../components/Overlay';
+import { NetBadge } from '../components/Funds';
 import { DialogHost } from '../components/Dialogs';
 import { AvatarTurn, ROCK_LABEL } from '../components/Avatar';
 import { RockView } from '../components/RockView';
@@ -286,8 +287,8 @@ function WalletPanel() {
           <span className={'wnet mono' + (w.cluster === 'mainnet-beta' ? ' main' : '')}>{net}</span>
         </div>
         <div className="wbal">
-          <b>{w.balance_sol == null ? '—' : solFmt(w.balance_sol)}</b>
-          <span className="mono">{w.balance_sol == null ? (w.error ? 'Balance unavailable right now' : 'Balance shows once the chain is live') : 'Balance'}</span>
+          <b>{w.balance_usdc == null ? '—' : w.balance_usdc.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' USDC'}</b>
+          <span className="mono">{w.balance_sol == null ? (w.error ? 'Balance unavailable right now' : 'Balance shows once the chain is live') : solFmt(w.balance_sol)}</span>
         </div>
         <div className="waddr">
           <code>{w.address}</code>
@@ -303,8 +304,9 @@ function WalletPanel() {
           {w.linked_wallet && <><dt>Withdrawals go to</dt><dd className="mono">{shortAddr(w.linked_wallet)}</dd></>}
         </dl>
         <p className="fine">{w.custodial
-          ? 'Created with your account. Every specimen you get is minted here as an NFT, and the network fees are paid by Space Rocks.'
+          ? `Created with your account. Every specimen you get is minted here as an NFT, and Space Rocks pays the network fees.${w.payments === 'live' ? ' Purchases are paid from this wallet: send USDC (or SOL) to the address above to top it up.' : ''}`
           : 'Your specimens are minted straight to this wallet.'}</p>
+        {w.custodial && w.cluster === 'devnet' && <p className="fine">Devnet test funds: <a href="https://faucet.circle.com" target="_blank" rel="noreferrer">USDC at faucet.circle.com</a> (choose Solana Devnet) · <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">SOL at faucet.solana.com</a></p>}
       </div>
 
       {w.custodial && (
@@ -500,6 +502,7 @@ function Page() {
       <Footer />
       <DialogHost d={dialog} />
       <Toasts />
+      <NetBadge />
     </>
   );
 }

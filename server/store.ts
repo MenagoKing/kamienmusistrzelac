@@ -5,7 +5,7 @@ import type {
 } from '../shared/types.ts';
 import { FILE_ITEMS } from '../shared/types.ts';
 import { BANDS, CATEGORY_NAME, DEFAULT_RULES, TIER_NOTE, shortAddr } from '../shared/rules.ts';
-import { all, get, run } from './db.ts';
+import { all, get, run, activeNetwork } from './db.ts';
 
 /* ---------- settings ---------- */
 
@@ -18,6 +18,8 @@ export function getRules(): Rules {
     bands: { ...DEFAULT_RULES.bands, ...(saved.bands ?? {}) },
     edge_split: { ...DEFAULT_RULES.edge_split, ...(saved.edge_split ?? {}) },
     google_client_id: saved.google_client_id || process.env.GOOGLE_CLIENT_ID || '',
+    // quotes in SOL use the live price when there is one (server/token.ts); the saved value is the fallback
+    sol_usd: (globalThis as unknown as { __srsolprice?: () => number | null }).__srsolprice?.() ?? saved.sol_usd ?? DEFAULT_RULES.sol_usd,
   };
 }
 
@@ -258,7 +260,7 @@ export function pageData(): PageData {
     redeemed: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE state = 'redeemed'")!.n,
   };
   const live = open.find(s => s.status === 'open') ?? open[0] ?? null;
-  return { token: tokenView(rules), chain: { cluster: process.env.CHAIN === 'simulated' ? 'simulated' : process.env.SOLANA_CLUSTER || 'devnet' }, listings: publicListings(), rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
+  return { token: tokenView(rules), chain: { cluster: process.env.CHAIN === 'simulated' ? 'simulated' : activeNetwork(), payments: (globalThis as unknown as { __srpaylive?: () => boolean }).__srpaylive?.() ? 'live' : 'simulated' }, listings: publicListings(), rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
 }
 
 /** Token payment info for the page; the live price comes from server/token.ts. */

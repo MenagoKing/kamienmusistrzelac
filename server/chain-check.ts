@@ -2,10 +2,10 @@
 // funds the authority if needed, mints a test Core asset with the specimen plugins, transfers it with
 // the permanent transfer delegate, reads it back, then burns it with the permanent burn delegate.
 import crypto from 'node:crypto';
-import { airdrop, authority, balanceSol, burnAsset, CLUSTER, explorer, mintAsset, readAsset, transferAsset } from './solana.ts';
+import { airdrop, authority, balanceSol, burnAsset, cluster, explorer, mintAsset, readAsset, transferAsset } from './solana.ts';
 import { b58encode } from './util.ts';
 
-console.log(`cluster ${CLUSTER} · authority ${authority()}`);
+console.log(`cluster ${cluster()} · authority ${authority()}`);
 let bal = await balanceSol();
 console.log('balance', bal, 'SOL');
 if (bal < 0.05) {

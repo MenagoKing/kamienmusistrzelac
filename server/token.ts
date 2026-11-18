@@ -55,3 +55,36 @@ export function tokenAmountFor(usd: number) {
   if (p == null) fail(409, `Paying with $${getRules().token_symbol} is not available right now`);
   return Math.round((usd / p!) * 10 ** 6) / 10 ** 6;
 }
+
+/* ---------- SOL price for quotes ---------- */
+// SOL prices come from a 5-minute average of Jupiter's price (sampled every 60 s). If it is
+// unavailable, Rules › SOL price is used. Not sampled in tests (CHAIN=simulated).
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const gs = globalThis as unknown as { __srsol?: { samples: { t: number; p: number }[]; timer?: NodeJS.Timeout; err?: string }; __srsolprice?: () => number | null };
+const solState = (gs.__srsol ??= { samples: [] });
+
+async function sampleSol() {
+  try {
+    const res = await fetch(`https://lite-api.jup.ag/price/v3?ids=${SOL_MINT}`, { signal: AbortSignal.timeout(8000) });
+    const j: any = await res.json();
+    const p = Number(j?.[SOL_MINT]?.usdPrice ?? j?.data?.[SOL_MINT]?.price);
+    if (Number.isFinite(p) && p > 1) { solState.samples.push({ t: Date.now(), p }); solState.err = undefined; } else solState.err = 'No SOL price';
+  } catch (e: any) { solState.err = String(e?.message ?? e).slice(0, 160); }
+  const cut = Date.now() - WINDOW_MS;
+  solState.samples = solState.samples.filter(s => s.t >= cut);
+}
+
+/** Live SOL/USD (5-minute average) or null. */
+export function solPriceUsd(): number | null {
+  const cut = Date.now() - WINDOW_MS;
+  const s = solState.samples.filter(x => x.t >= cut);
+  return s.length ? Math.round((s.reduce((a, x) => a + x.p, 0) / s.length) * 100) / 100 : null;
+}
+gs.__srsolprice = solPriceUsd;
+
+export function startSolPrice() {
+  if (process.env.CHAIN === 'simulated') return;
+  if (solState.timer) clearInterval(solState.timer);
+  solState.timer = setInterval(sampleSol, 60_000);
+  sampleSol();
+}

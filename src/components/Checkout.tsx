@@ -9,6 +9,7 @@ import { BANDS, BAND_NAME, TIER_NAME, rarityOf, tokenPrice } from '../../shared/
 import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
 import { Media } from './Media';
+import { Funds, FundsError, payNote } from './Funds';
 import { RockView } from './RockView';
 import type { PlanetKind } from '../lib/planet';
 
@@ -188,12 +189,13 @@ export function BuyDialog({ specimen: initial }: { specimen: Specimen }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [gone, setGone] = useState(false);
+  const [funds, setFunds] = useState<any>(null);
   const rock = rockPriceOf(specimen) ?? 0;
   const price = marketPrice(rock, data.rules);
   const sourced = !!specimen.sourced;
   const done = specimen.file_done ?? [];
   const buy = async () => {
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setFunds(null);
     try {
       const r = await buySpecimen(specimen.id, cur, price);
       await refresh();
@@ -202,6 +204,7 @@ export function BuyDialog({ specimen: initial }: { specimen: Specimen }) {
     } catch (e: any) {
       setBusy(false);
       const d = e?.data;
+      if (d?.code === 'funds') setFunds(d);
       if (d?.code === 'changed' || d?.available === false) {
         // Live re-check: the dealer's price or availability changed. Stop, show the fresh state.
         try { const fresh = await api<Specimen>('GET', `/api/specimens/${specimen.id}`); setSpecimen(fresh); } catch { /* keep */ }
@@ -231,11 +234,13 @@ export function BuyDialog({ specimen: initial }: { specimen: Specimen }) {
             <dl className="kv"><dt>Rock value</dt><dd>{usd(rock)}</dd><dt>Fixed price</dt><dd>{usd(price)}</dd><dt>Instant offer if you sell back, {pct(data.rules.buyback_share)}%</dt><dd>{usd(buyback(rock, data.rules))}</dd></dl>
           )}
           <PayWith value={cur} onChange={setCur} price={price} allowToken={sourced} />
-          {err && <p className="err" role="alert">{err}</p>}
+          <Funds need={cur === 'TOKEN' ? 0 : price} currency={cur} />
+          {err && !funds && <p className="err" role="alert">{err}</p>}
+          <FundsError info={funds} />
           <button className="btn wide" type="button" onClick={buy} disabled={busy || gone}>{busy ? <><Spinner label="Checking with the dealer" />Checking price and availability…</> : gone ? 'No longer available' : payLabel(sourced ? 'Reserve' : 'Buy', cur, price, data.rules, data.token)}</button>
           <p className="fine">{sourced
             ? 'Sourced from an independent certified dealer, purchased and shipped when you redeem. Reserved for you the moment you pay and minted to you as an NFT on Solana. Price and availability are checked again when you confirm.'
-            : 'From our own stock. Minted to you as a Metaplex Core NFT on Solana with the full specimen file.'} Payments on this preview are simulated: nothing is charged.</p>
+            : 'From our own stock. Minted to you as a Metaplex Core NFT on Solana with the full specimen file.'} {payNote(data)}</p>
         </div>
       </div>
     </Overlay>
@@ -250,14 +255,15 @@ export function BuyListingDialog({ listing }: { listing: Listing }) {
   const [err, setErr] = useState('');
   const done = sp.file_done ?? [];
   const rock = rockPriceOf(sp);
+  const [funds, setFunds] = useState<any>(null);
   const buy = async () => {
-    setBusy(true); setErr('');
+    setBusy(true); setErr(''); setFunds(null);
     try {
       const r = await api<{ reveal: PackReveal; payment: TxResult; mint: string }>('POST', `/api/listings/${listing.id}/buy`, { currency: cur });
       await refresh();
       toast(`${sp.name} is yours`);
       open({ kind: 'reveal', reveal: r.reveal, payment: r.payment, via: 'market' });
-    } catch (e: any) { setErr(e.message); setBusy(false); }
+    } catch (e: any) { setErr(e.message); setBusy(false); if (e?.data?.code === 'funds') setFunds(e.data); }
   };
   return (
     <Overlay label={`Buy ${sp.name} from ${listing.seller}`} wide title={<div className="sec mono"><span>From collectors</span><span>{sp.id}</span></div>}>
@@ -275,11 +281,13 @@ export function BuyListingDialog({ listing }: { listing: Listing }) {
             {rock != null && (sp.sourced ? <><dt>If you cancel later</dt><dd>{usd(rock)} back</dd></> : <><dt>Instant offer if you sell back</dt><dd>{usd(buyback(rock, data.rules))}</dd></>)}
           </dl>
           <PayWith value={cur} onChange={setCur} price={listing.price_usd} />
-          {err && <p className="err" role="alert">{err}</p>}
+          <Funds need={listing.price_usd} currency={cur} />
+          {err && !funds && <p className="err" role="alert">{err}</p>}
+          <FundsError info={funds} />
           {listing.mine ? <p className="ok">This is your listing. Manage it from your account.</p> : (
             <button className="btn wide" type="button" onClick={buy} disabled={busy}>{busy ? <><Spinner label="Paying" />Confirming…</> : payLabel('Buy', cur, listing.price_usd, data.rules, data.token)}</button>
           )}
-          <p className="fine">{sp.sourced ? 'The reservation and its escrow move to you with the NFT; the dealer ships when you redeem.' : 'The NFT moves to you on Solana.'} {pct(data.rules.royalty)}% of the price goes to the platform as a royalty. Payments on this preview are simulated.</p>
+          <p className="fine">{sp.sourced ? 'The reservation and its escrow move to you with the NFT; the dealer ships when you redeem.' : 'The NFT moves to you on Solana.'} {pct(data.rules.royalty)}% of the price goes to the platform as a royalty. {payNote(data)}</p>
         </div>
       </div>
     </Overlay>
@@ -331,8 +339,9 @@ export function PackDialog({ series }: { series: Series }) {
           )}
           <ol className="how2"><li><b>1</b>Pay</li><li><b>2</b>The draw picks a sealed pack</li><li><b>3</b>The rock is yours, minted as an NFT</li></ol>
           <PayWith value={cur} onChange={setCur} price={price} />
+          <Funds need={price} currency={cur} />
           <button className="btn wide big" type="button" disabled={!left} onClick={() => open({ kind: 'opening', series, currency: cur, seed: clientSeed() })}>Open a pack · {cur === 'USDC' ? usd(price) : sol(price, data.rules)}</button>
-          <p className="fine">Verifiable draw, no replacement: commitment <code>{series.commit_hash?.slice(0, 12)}…</code>. <button type="button" className="lnk" onClick={() => open({ kind: 'proof', seriesId: series.id, name: series.name })}>Check every draw</button>. Payments on this preview are simulated.</p>
+          <p className="fine">Verifiable draw, no replacement: commitment <code>{series.commit_hash?.slice(0, 12)}…</code>. <button type="button" className="lnk" onClick={() => open({ kind: 'proof', seriesId: series.id, name: series.name })}>Check every draw</button>. {payNote(data)}</p>
         </div>
       </div>
     </Overlay>
@@ -374,12 +383,13 @@ export function PackOpening({ series, currency, seed }: { series: Series; curren
   const [phase, setPhase] = useState<'charge' | 'open' | 'reveal'>('charge');
   const [res, setRes] = useState<{ reveal: PackReveal; payment: TxResult } | null>(null);
   const [err, setErr] = useState('');
+  const [funds, setFunds] = useState<any>(null);
   const [minTime, setMinTime] = useState(false);
   const left = series.remaining.floor + series.remaining.par + series.remaining.hit;
 
   useEffect(() => {
     let alive = true;
-    openPack(series.id, currency, seed).then(r => { if (alive) { setRes(r); refresh(); } }, e => alive && setErr(e.message));
+    openPack(series.id, currency, seed).then(r => { if (alive) { setRes(r); refresh(); } }, e => { if (alive) { setErr(e.message); if (e?.data?.code === 'funds') setFunds(e.data); } });
     const t = setTimeout(() => alive && setMinTime(true), 1300);
     return () => { alive = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -436,7 +446,7 @@ export function PackOpening({ series, currency, seed }: { series: Series; curren
                 </dl>
                 <NftLine specimenId={sp.id} />
                 <RevealActions reveal={res.reveal} onDone={close} extra={<button className="btn line" type="button" onClick={() => open({ kind: 'pack', series })}>Open another</button>} />
-                <TxLine tx={res.payment.tx} simulated={res.payment.simulated} label={`Paid ${res.payment.currency === 'SOL' ? res.payment.amount + ' SOL' : usd(res.payment.amount)}`} />
+                <TxLine tx={res.payment.tx} simulated={res.payment.simulated} label={`Paid ${res.payment.currency === 'SOL' ? res.payment.amount.toFixed(4) + ' SOL' : usd(res.payment.amount)}`} />
                 <button className="x opn-x" type="button" onClick={close} aria-label="Close"><i aria-hidden="true" /></button>
               </div>
             </div>
@@ -445,7 +455,7 @@ export function PackOpening({ series, currency, seed }: { series: Series; curren
       )}
 
       {err && (
-        <div className="opn2-panel solo"><h3>The pack did not open.</h3><p className="dlg-p">{err}</p><div className="acts"><button className="btn" type="button" onClick={close}>Back</button></div></div>
+        <div className="opn2-panel solo"><h3>The pack did not open.</h3>{funds ? <FundsError info={funds} /> : <p className="dlg-p">{err}</p>}<div className="acts"><button className="btn" type="button" onClick={close}>Back</button></div></div>
       )}
     </div>
   );
@@ -468,7 +478,7 @@ export function RevealDialog({ reveal, payment, via, reservation, confirm }: { r
           {reservation && <p className="fine src-line">Sourced from an independent certified dealer, purchased and shipped when you redeem.</p>}
           {via !== 'holding' && <NftLine specimenId={sp.id} />}
           <RevealActions reveal={reveal} reservation={reservation} onDone={close} confirm={confirm} />
-          {payment && <TxLine tx={payment.tx} simulated={payment.simulated} label={`Paid ${payment.currency === 'SOL' ? payment.amount + ' SOL' : payment.currency === 'TOKEN' ? payment.amount.toLocaleString('en-US') + ' ' + data.token.symbol : usd(payment.amount)}`} />}
+          {payment && <TxLine tx={payment.tx} simulated={payment.simulated} label={`Paid ${payment.currency === 'SOL' ? payment.amount.toFixed(4) + ' SOL' : payment.currency === 'TOKEN' ? payment.amount.toLocaleString('en-US') + ' ' + data.token.symbol : usd(payment.amount)}`} />}
         </div>
       </div>
     </Overlay>

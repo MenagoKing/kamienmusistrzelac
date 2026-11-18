@@ -76,15 +76,33 @@ Every specimen a collector owns gets a real **Metaplex Core** NFT (`server/solan
 
 **Funding:** the devnet RPC faucet is closed, so fund the authority address (shown in Admin › Solana NFTs, generated into `data/solana-authority.json`) at https://faucet.solana.com. Until then NFTs wait in the queue. `npm run chain:check` mints, transfers and burns a test asset to prove the path.
 
-## What is simulated (to wire before mainnet)
+## Devnet and mainnet
 
-All on-chain effects go through one interface, `server/chain.ts`:
+The site runs on one Solana network at a time, chosen in **Admin › Network** (the admin password, and typing MAINNET for mainnet). The two are separate worlds (`server/db.ts`, `server/network.ts`): each has its own database, vault key, account wallets, treasury and escrow (devnet in `data/`, mainnet in `data/mainnet/`). Switching signs collectors out (their accounts belong to one network) and keeps the admin signed in; nothing is deleted. Mainnet starts empty (no sample data, no demo wallet) and can never be reset.
 
-| Method | Today (SimulatedChain) | Production |
+**Payments** (`server/chain.ts`) come from the collector's own Space Rocks wallet, paid on-chain before the order is written; the vault pays the network fees, so collectors only need the USDC (or SOL) for the price:
+
+| | devnet | mainnet |
 |---|---|---|
-| `charge` | returns a fake signature | Solana Pay / USDC or SOL transfer, verified on-chain before the pull |
-| `payout` | fake signature | USDC from the treasury multisig |
-| NFTs | **real** Metaplex Core on devnet (see above) | same code on mainnet-beta with a funded authority |
+| Payments | simulated, or real devnet transfers (toggle in Admin › Network) | always real |
+| Money | devnet USDC (faucet.circle.com) and SOL (faucet.solana.com) | USDC and SOL |
+| NFTs | real Metaplex Core NFTs on devnet | real NFTs on mainnet |
+
+- A market reservation pays the rock price into the **escrow** wallet and the commission into the **treasury**, in one transaction (USDC). SOL and token payments go to the treasury, which then funds the escrow in USDC.
+- Refunds, buybacks, seller payouts, escrow releases and treasury withdrawals go through a **payout queue** (Admin › Payouts & treasury) that sends them in order and waits, retrying, until the paying wallet has the funds. Escrow money can never be withdrawn by the admin.
+- If a paid purchase can no longer complete (the rock sold in the meantime, the price changed), the payment is refunded automatically. Not enough funds: nothing is charged, the collector sees a top-up box with their address.
+- SOL prices use a live 5-minute average from Jupiter; Rules › SOL price is the fallback.
+- NFT metadata links carry the network (`/api/nft/devnet/…`, `/api/nft/mainnet/…`) and are always served from that network's data.
+
+**Going live on mainnet** (Admin › Network shows these checks):
+1. A dedicated mainnet RPC (Helius, Triton, QuickNode): paste the URL in Admin › Network or set `SOLANA_RPC_MAINNET`.
+2. Send SOL to the mainnet vault address shown there (fees, about 0.005 SOL per NFT, mostly returned when it is burned).
+3. Put USDC in the mainnet treasury for refunds and buybacks.
+4. Serve the site on its https domain and set `PUBLIC_URL` to it (NFT metadata links), then remove `INSECURE_COOKIES`.
+5. Keep `CUSTODY_KEY_MAINNET` (generated into `.env` by the install script) and the data folder backed up offline.
+6. Add real specimens, then switch.
+
+Keys per network: `SOLANA_AUTHORITY` / `SOLANA_AUTHORITY_MAINNET`, `CUSTODY_KEY` / `CUSTODY_KEY_MAINNET`, `SOLANA_RPC` / `SOLANA_RPC_MAINNET`; otherwise files in each network's data folder. Tests run with `CHAIN=simulated` and check the live payment logic against an in-memory stand-in for Solana.
 
 The draw is commit-reveal (`shared/fair.ts`): publish sha256(seed) at open, draw with HMAC-SHA256(seed, series:nonce:client seed), reveal the seed at sell-out. Swap in an on-chain VRF (Switchboard or ORAO) behind the same `drawPick` when the program exists. Launch drop resolution is recorded by the admin today; the brief's multisig signs it later. Social login (Google, X), email verification and password reset by email, withdrawing NFTs to the linked wallet, listings on external marketplaces (Tensor / Magic Eden) and the $ROCKS holder early access are not built.
 

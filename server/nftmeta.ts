@@ -2,6 +2,11 @@
 // The specimen file is also on-chain as Attributes; this JSON adds the image and description.
 import type { IncomingMessage } from 'node:http';
 import { specimenRow, fileOf, photoOf } from './store.ts';
+import { activeNetwork } from './db.ts';
+
+/** The network part of NFT links: metadata must always come from the network the NFT lives on. */
+export const netSlug = () => (activeNetwork() === 'mainnet-beta' ? 'mainnet' : 'devnet');
+const shareFile = (id: string) => (activeNetwork() === 'mainnet-beta' ? `share-mainnet-${id}.png` : `share-${id}.png`);
 import { fail } from './util.ts';
 
 const esc = (s: string) => s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
@@ -11,7 +16,7 @@ export function nftJson(req: IncomingMessage, id: string) {
   const s = specimenRow(id.replace(/\.json$/, '')) ?? fail(404, 'Unknown specimen');
   const f = fileOf(s);
   const photo = photoOf(s);
-  const image = photo ? (photo.startsWith('http') ? photo : base(req) + photo) : `${base(req)}/api/nft/${s.id}.svg`;
+  const image = photo ? (photo.startsWith('http') ? photo : base(req) + photo) : `${base(req)}/api/nft/${netSlug()}/${s.id}.svg`;
   return {
     name: `${s.name} ${s.id}`,
     symbol: 'ROCK',
@@ -59,16 +64,16 @@ export function saveShareImage(id: string, data: unknown) {
   if (!m) fail(400, 'Send the card as a PNG');
   const buf = Buffer.from(m![1], 'base64');
   if (buf.length > 3 * 1024 * 1024) fail(413, 'The card image is too large');
-  fs.writeFileSync(path.join(UPLOAD_DIR, `share-${s.id}.png`), buf);
-  return { image: `/uploads/share-${s.id}.png`, page: `/s/${s.id}` };
+  fs.writeFileSync(path.join(UPLOAD_DIR, shareFile(s.id)), buf);
+  return { image: `/uploads/${shareFile(s.id)}`, page: `/s/${s.id}` };
 }
 
 export function sharePage(req: IncomingMessage, id: string) {
   const s = specimenRow(id);
   if (!s) return null;
   const b = base(req);
-  const hasImg = fs.existsSync(path.join(UPLOAD_DIR, `share-${s.id}.png`));
-  const img = hasImg ? `${b}/uploads/share-${s.id}.png` : `${b}/api/nft/${s.id}.svg`;
+  const hasImg = fs.existsSync(path.join(UPLOAD_DIR, shareFile(s.id)));
+  const img = hasImg ? `${b}/uploads/${shareFile(s.id)}` : `${b}/api/nft/${netSlug()}/${s.id}.svg`;
   const title = `${s.name} · ${s.class} · Space Rocks`;
   const desc = `A real, certified meteorite: ${s.name}, ${s.class}, ${s.mass_g} g. Minted on Solana.`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">

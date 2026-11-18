@@ -146,7 +146,7 @@ const admin = (method: string, pattern: string, h: (c: Ctx, actor: string) => un
 admin('GET', '/overview', () => A.overview());
 admin('GET', '/specimens', ({ query }) => A.listSpecimens(query));
 admin('POST', '/specimens', ({ body }, a) => A.createSpecimen(a, body));
-admin('POST', '/specimens/samples', ({ body }, a) => generateSamples(a, body?.count));
+admin('POST', '/specimens/samples', ({ body }, a) => generateSamples(a, body?.count, body?.purpose));
 admin('DELETE', '/specimens/samples', (_c, a) => removeSamples(a));
 admin('GET', '/specimens/:id', ({ params }) => { const s = specimenRow(params[0]) ?? fail(404, 'Specimen not found'); return { specimen: A.listSpecimens(new URLSearchParams({ q: s.id }))[0], history: all('SELECT * FROM ledger WHERE specimen_id = ? ORDER BY created_at DESC', s.id) }; });
 admin('PUT', '/specimens/:id', ({ params, body }, a) => A.updateSpecimen(a, params[0], body));

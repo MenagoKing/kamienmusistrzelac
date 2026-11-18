@@ -3,7 +3,7 @@ import { api } from '../../lib/api';
 import { useStill } from '../../lib/stills';
 import { CATEGORY_NAME, marketPrice } from '../../../shared/rules.ts';
 import { FILE_ITEMS, type RockType, type Rules, type SpecimenAdmin, type SpecimenFile } from '../../../shared/types.ts';
-import { Badge, Confirm, Drawer, Empty, ErrorBox, Field, Loading, PageHead, Toggle, go, money, short, useAction, useFetch, when } from '../ui';
+import { Badge, Confirm, Drawer, Empty, ErrorBox, Field, Loading, PageHead, Toggle, go, money, short, useAction, useFetch, useToast, when } from '../ui';
 import type { Dealer } from './Dealers';
 
 const rockOf = (s: Partial<SpecimenAdmin>) => (s.dealer_id ? s.dealer_price_usd ?? s.vault_value_usd ?? null : s.vault_value_usd ?? null);
@@ -31,6 +31,8 @@ export function Specimens({ openId }: { openId?: string }) {
   const dealers = useFetch<Dealer[]>('/api/admin/dealers');
   const dname = (id?: string | null) => (id ? dealers.data?.find(d => d.id === id)?.name ?? id : null);
   const [editing, setEditing] = useState<SpecRow | 'new' | null>(null);
+  const { busy: sbusy, run: srun } = useAction();
+  const stoast = useToast();
 
   useEffect(() => {
     if (!openId) return;
@@ -45,6 +47,8 @@ export function Specimens({ openId }: { openId?: string }) {
   return (
     <>
       <PageHead kicker="Inventory" title="Specimens">
+        <button className="ab ghost" disabled={sbusy} onClick={async () => { const n = prompt('How many sample specimens? (1 to 500)', '150'); if (!n) return; const r = await srun(() => api<{ created: number; listed: boolean }>('POST', '/api/admin/specimens/samples', { count: Number(n) })); if (r) { stoast(r.listed ? r.created + ' sample specimens added to the market' : r.created + ' sample specimens added, unlisted (mainnet)'); list.reload(); } }}>+ Add sample specimens</button>
+        <button className="ab ghost" disabled={sbusy} onClick={async () => { if (!confirm('Remove every generated sample specimen that nobody holds?')) return; const r = await srun(() => api<{ removed: number }>('DELETE', '/api/admin/specimens/samples')); if (r) { stoast(r.removed + ' samples removed'); list.reload(); } }}>Remove samples</button>
         <button className="ab primary" onClick={() => setEditing('new')}>+ New specimen</button>
       </PageHead>
 

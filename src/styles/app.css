@@ -132,7 +132,9 @@ html.locked{overflow:hidden}
 
 /* share */
 .sharecv{width:100%;aspect-ratio:1200/630;border-radius:14px;border:1px solid var(--line);background:#120d0b}
-.dlg .acts{display:flex;flex-wrap:wrap;gap:10px;margin-top:16px}
+/* every row of action buttons: one spacing everywhere */
+.acts{display:flex;flex-wrap:wrap;align-items:center;gap:10px}
+.dlg .acts{margin-top:16px}
 
 /* register + proof */
 .rbar{display:grid;gap:12px;margin-bottom:8px}.rbar input{width:100%}

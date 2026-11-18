@@ -77,7 +77,7 @@ html{-webkit-tap-highlight-color:transparent;scroll-behavior:smooth;scroll-paddi
   .dlg-hd{margin-bottom:10px}
   .dlg-t h3{font-size:30px}
   .x{width:40px;height:40px}.x i::before,.x i::after{top:19px;left:11px;right:11px}
-  .dlg .acts{display:grid;grid-template-columns:1fr 1fr}
+  .dlg .acts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .dlg .acts .btn{justify-content:center;padding:0 12px}
   .dlg .acts .btn:first-child:nth-last-child(odd){grid-column:1/-1}
   .btn.wide{min-height:54px;font-size:16px}
@@ -150,12 +150,10 @@ html{-webkit-tap-highlight-color:transparent;scroll-behavior:smooth;scroll-paddi
   .pk2-bd .btn.wide{bottom:0}
 }
 @media (max-width:700px){
-  .opn2-panel{width:100%;right:0;left:0;bottom:0;transform:none;border-radius:24px 24px 0 0;border-width:1px 0 0;padding:20px 18px calc(18px + env(safe-area-inset-bottom,0px));max-height:56svh;animation:sheetin .5s 1s cubic-bezier(.2,.7,.1,1) both}
   .opn2-panel h3{font-size:36px;margin:10px 0 6px}
-  .opn2-panel .acts{display:grid;grid-template-columns:1fr 1fr}
+  .opn2-panel .acts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .opn2-panel .acts .btn{justify-content:center;padding:0 10px}
   .opn2-panel .acts .btn:first-child:nth-last-child(odd){grid-column:1/-1}
-  .opn2-drag{bottom:-6%}
 }
 @media (max-width:700px){
   .acc-hero>.acc-id,.acc-hero>.acc-stats,.acc-hero>.acc-cta{justify-self:stretch;width:100%}

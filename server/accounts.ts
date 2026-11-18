@@ -8,6 +8,9 @@ import type { Achievement, Activity, Profile, RockType } from '../shared/types.t
 import { CATEGORY_NAME } from '../shared/rules.ts';
 import { activeNetwork, all, get, now, run, tx } from './db.ts';
 import { DAY, WALLET_COOKIE, newSession, sessionAge, touchWallet, verifyWalletSignature } from './auth.ts';
+import { ledger } from './ops.ts';
+import { nftOwnerOf, queueTransfer } from './nft.ts';
+import { moveReservation } from './sources.ts';
 import { createWallet, custodialOf, faucetAt, markExported, markFaucet, secretOf } from './custody.ts';
 import { b58encode, fail, str } from './util.ts';
 
@@ -214,7 +217,7 @@ export function profileOf(address: string): Profile {
   };
 }
 
-const ACT_KINDS = ['market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund', 'reservation', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund', 'price_difference_topup'];
+const ACT_KINDS = ['wallet_withdrawal', 'nft_gift_out', 'nft_gift_in', 'nft_sent', 'market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund', 'reservation', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund', 'price_difference_topup'];
 
 export function activityOf(address: string): Activity[] {
   return all<any>(`SELECT l.id, l.kind, l.usd, l.specimen_id, s.name specimen_name, l.created_at FROM ledger l LEFT JOIN specimens s ON s.id = l.specimen_id
@@ -282,19 +285,77 @@ export async function walletFaucet(address: string) {
 }
 
 /** The wallet's private key, for importing it into Phantom or Solflare. Needs the password (or a fresh sign-in). */
-export function walletExport(req: IncomingMessage, address: string, b: any) {
-  if (!exportAllowed()) fail(403, 'Key export is turned off on mainnet.');
-  const pk = custodialOf(address) ?? fail(404, 'This account has no Space Rocks wallet: you signed in with your own.');
+/** Sensitive actions (key export, sending money or NFTs) ask for the password, or a fresh sign-in for Google accounts. */
+function confirmIdentity(req: IncomingMessage, address: string, b: any, what: string) {
   const t = throttle(req);
   const u = userRow(address);
   const kind = get<{ kind: string }>('SELECT kind FROM wallets WHERE address = ?', address)?.kind;
   if (u?.password_hash) {
     if (!checkPassword(typeof b?.password === 'string' ? b.password : '', u.password_hash)) { t.bad(); fail(401, 'Wrong password'); }
-  } else if (kind !== 'demo' && sessionAge(req) > 15 * 60e3) {
-    fail(403, 'For your safety, sign out and sign in again, then export within 15 minutes.');
+  } else if (kind !== 'demo' && kind !== 'wallet' && sessionAge(req) > 15 * 60e3) {
+    fail(403, `For your safety, sign out and sign in again, then ${what} within 15 minutes.`);
   }
   t.ok();
+}
+
+export function walletExport(req: IncomingMessage, address: string, b: any) {
+  if (!exportAllowed()) fail(403, 'Key export is turned off on mainnet.');
+  const pk = custodialOf(address) ?? fail(404, 'This account has no Space Rocks wallet: you signed in with your own.');
+  confirmIdentity(req, address, b, 'export');
   const secret = secretOf(address);
   markExported(address);
   return { address: pk, secret_base58: b58encode(secret), secret_json: JSON.stringify([...secret]) };
+}
+
+const isAddress = (a: string) => /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(a);
+
+/** Sends USDC or SOL from the collector's Space Rocks wallet to any address. */
+export async function walletWithdraw(req: IncomingMessage, address: string, b: any) {
+  const to = String(b?.to ?? '').trim();
+  if (!isAddress(to)) fail(400, 'Enter a Solana address');
+  const currency = b?.currency === 'SOL' ? 'SOL' : 'USDC';
+  const amount = b?.amount === 'max' ? 'max' : Number(b?.amount);
+  if (amount !== 'max' && !(amount > 0)) fail(400, 'Enter an amount');
+  confirmIdentity(req, address, b, 'send');
+  const { sendFromAccount } = await import('./chain.ts');
+  const r = await sendFromAccount(address, to, currency, amount);
+  const rules = (await import('./store.ts')).getRules();
+  ledger('wallet_withdrawal', { wallet: address, usd: -(currency === 'USDC' ? r.amount : Math.round(r.amount * rules.sol_usd * 100) / 100), currency, amount: -r.amount, tx: r.signature, split: { to } });
+  return r;
+}
+
+/**
+ * Sends a specimen's NFT to any address. To another Space Rocks account it is a gift: the specimen
+ * (and a reservation with its escrow) becomes theirs. To an outside wallet the NFT moves there and
+ * the specimen stays in this account (sell, cancel or redeem as before; the vault can move it back).
+ */
+export function sendNft(req: IncomingMessage, address: string, id: string, b: any) {
+  const to = String(b?.to ?? '').trim();
+  if (!isAddress(to)) fail(400, 'Enter a Solana address');
+  confirmIdentity(req, address, b, 'send');
+  return tx(() => {
+    const s = get<{ id: string; owner: string | null; state: string; nft_owner: string | null; name: string }>('SELECT id, owner, state, nft_owner, name FROM specimens WHERE id = ?', id) ?? fail(404, 'Specimen not found');
+    if (s.owner !== address || s.state !== 'held') fail(403, 'You do not hold this specimen');
+    if (get("SELECT 1 FROM listings WHERE specimen_id = ? AND status = 'active'", id)) fail(409, 'Take it off sale first');
+    if (get("SELECT 1 FROM reservations WHERE specimen_id = ? AND status = 'sold_at_source'", id)) fail(409, 'The dealer sold this specimen: choose a replacement or a refund first');
+    if (s.nft_owner === to) fail(409, 'The NFT is already at that address');
+    // a Space Rocks account? (its wallet address, or the account address itself)
+    const recipient = get<{ owner: string }>("SELECT owner FROM custody WHERE pubkey = ? AND owner NOT LIKE 'sys:%'", to)?.owner
+      ?? (get("SELECT 1 FROM wallets WHERE address = ? AND kind != 'sample'", to) ? to : null);
+    if (recipient === address) {
+      queueTransfer(id, nftOwnerOf(address));
+      return { ok: true, gift: false, to };
+    }
+    if (recipient) {
+      run("UPDATE specimens SET owner = ?, acquired_via = 'secondary', acquired_at = ?, paid_usd = 0, updated_at = ? WHERE id = ?", recipient, now(), now(), id);
+      moveReservation(id, recipient);
+      queueTransfer(id, nftOwnerOf(recipient));
+      ledger('nft_gift_out', { wallet: address, specimen_id: id, usd: 0, currency: 'USDC', amount: 0, split: { to: recipient } });
+      ledger('nft_gift_in', { wallet: recipient, specimen_id: id, usd: 0, currency: 'USDC', amount: 0, split: { from: address } });
+      return { ok: true, gift: true, to };
+    }
+    queueTransfer(id, to);
+    ledger('nft_sent', { wallet: address, specimen_id: id, usd: 0, currency: 'USDC', amount: 0, split: { to } });
+    return { ok: true, gift: false, to };
+  });
 }

@@ -343,8 +343,37 @@ try {
     // the admin sees the queue
     const q = await ok('GET', '/api/admin/payouts', undefined, 'admin');
     assert.ok(q.live && q.rows.some((r: any) => r.memo.startsWith('cancel') && r.status === 'done'));
+    // sending money out of the account wallet
+    const ext = 'Ext1111111111111111111111111111111111111111';
+    assert.equal((await call('POST', '/api/me/wallet/withdraw', { to: ext, currency: 'USDC', amount: 5, password: 'nope' }, 'lp')).status, 401);
+    assert.equal((await call('POST', '/api/me/wallet/withdraw', { to: 'not-an-address', currency: 'USDC', amount: 5, password: 'longpassword' }, 'lp')).status, 400);
+    const usdcBefore = usdc[lp];
+    const wd = await ok('POST', '/api/me/wallet/withdraw', { to: ext, currency: 'USDC', amount: 25, password: 'longpassword' }, 'lp');
+    assert.equal(wd.amount, 25);
+    assert.equal(usdc[ext], 25);
+    assert.equal(usdc[lp], Math.round((usdcBefore - 25) * 1e6) / 1e6);
+    assert.equal((await call('POST', '/api/me/wallet/withdraw', { to: ext, currency: 'USDC', amount: 1e9, password: 'longpassword' }, 'lp')).status, 400, 'more than the balance');
+    const all1 = await ok('POST', '/api/me/wallet/withdraw', { to: ext, currency: 'SOL', amount: 'max', password: 'longpassword' }, 'lp');
+    assert.ok(all1.amount > 0 && (sol[lp] ?? 0) < 1e-9, 'max sends everything');
+    assert.ok((await ok('GET', '/api/me', undefined, 'lp')).activity.some((a: any) => a.kind === 'wallet_withdrawal'));
     delete (globalThis as any).__srtestlive;
     console.log('live payments ok');
+
+    // sending an NFT: to another account it is a gift, to an outside wallet the specimen stays yours
+    const giver = (await ok('GET', '/api/me', undefined, 'p1'));
+    const free = giver.holdings.filter((h: any) => h.status.kind === 'held' && !h.listing && h.reservation?.status !== 'sold_at_source');
+    const p2addr = (await ok('GET', '/api/me', undefined, 'p2')).address;
+    assert.equal((await call('POST', `/api/specimens/${free[0].id}/send`, { to: p2addr, password: 'wrong' }, 'p1')).status, 401);
+    const gift = await ok('POST', `/api/specimens/${free[0].id}/send`, { to: p2addr, password: 'evenlongerpass' }, 'p1');
+    assert.equal(gift.gift, true);
+    await settle();
+    assert.ok((await ok('GET', '/api/me', undefined, 'p2')).holdings.some((h: any) => h.id === free[0].id && h.nft_owner === p2addr), 'the gift is theirs');
+    const out = await ok('POST', `/api/specimens/${free[1].id}/send`, { to: ext, password: 'evenlongerpass' }, 'p1');
+    assert.equal(out.gift, false);
+    await settle();
+    const kept = (await ok('GET', '/api/me', undefined, 'p1')).holdings.find((h: any) => h.id === free[1].id);
+    assert.equal(kept.nft_owner, ext, 'the NFT is in the outside wallet, the specimen stays in the account');
+    console.log('send money and NFTs ok');
   }
 
   // ---- devnet / mainnet: separate data, admin switch ----

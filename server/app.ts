@@ -10,7 +10,7 @@ import * as A from './admin.ts';
 import { getRules, holdingsOf, pageData, redemptionOf, seriesProof, seriesRow, specimenRow, toPublic, toReveal, toSeries, vaultRegister } from './store.ts';
 import { all } from './db.ts';
 import { reseed } from './seed.ts';
-import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile, walletExport, walletFaucet, walletInfo } from './accounts.ts';
+import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile, sendNft, walletExport, walletFaucet, walletInfo, walletWithdraw } from './accounts.ts';
 import { adminListings, buyListing, cancelListing, listForSale, listingsOf } from './market.ts';
 import { publicListings } from './store.ts';
 import * as SRC from './sources.ts';
@@ -118,6 +118,8 @@ on('POST', '/api/me/unlink-wallet', ({ req }) => unlinkWallet(requireWallet(req)
 on('GET', '/api/me/wallet', ({ req }) => walletInfo(requireWallet(req)));
 on('POST', '/api/me/wallet/faucet', ({ req }) => walletFaucet(requireWallet(req)));
 on('POST', '/api/me/wallet/export', ({ req, body }) => walletExport(req, requireWallet(req), body));
+on('POST', '/api/me/wallet/withdraw', ({ req, body }) => walletWithdraw(req, requireWallet(req), body));
+on('POST', '/api/specimens/:id/send', ({ req, params, body }) => sendNft(req, requireWallet(req), params[0], body));
 
 /* ---------- collectors' market ---------- */
 

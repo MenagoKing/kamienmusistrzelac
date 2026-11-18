@@ -247,6 +247,54 @@ function WalletChip() {
   );
 }
 
+const SOL_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** Send USDC or SOL from the account wallet to any address. */
+function SendMoney({ w, onSent }: { w: WalletInfo; onSent: () => void }) {
+  const { me, toast } = useApp();
+  const [to, setTo] = useState('');
+  const [cur, setCur] = useState<'USDC' | 'SOL'>('USDC');
+  const [amount, setAmount] = useState('');
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [sent, setSent] = useState<{ signature: string; amount: number; currency: string; to: string } | null>(null);
+  const have = cur === 'USDC' ? w.balance_usdc : w.balance_sol;
+  const needsPw = !!me?.profile.has_password;
+  const valid = SOL_ADDR.test(to.trim()) && (amount === 'max' || Number(amount) > 0) && (!needsPw || pw.length > 0);
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setErr(''); setSent(null);
+    try {
+      const r = await api<{ signature: string; amount: number; currency: string; to: string }>('POST', '/api/me/wallet/withdraw', { to: to.trim(), currency: cur, amount: amount === 'max' ? 'max' : Number(amount), password: pw });
+      setSent(r); setAmount(''); setPw(''); toast(`Sent ${r.amount} ${r.currency}`); onSent();
+    } catch (er: any) { setErr(er.message); } finally { setBusy(false); }
+  };
+  const ex = (sig: string) => `https://explorer.solana.com/tx/${sig}${w.cluster === 'mainnet-beta' ? '' : '?cluster=' + (w.cluster === 'simulated' ? 'devnet' : w.cluster)}`;
+  return (
+    <div className="setc">
+      <h3 className="acc-h">Send money</h3>
+      <p className="dlg-p">Send USDC or SOL from this wallet to any Solana address: an exchange, Phantom, a friend. Space Rocks pays the network fee.</p>
+      <form className="fm" onSubmit={submit}>
+        <label>To address<input value={to} onChange={e => setTo(e.target.value)} placeholder="Solana address" spellCheck={false} autoComplete="off" /></label>
+        <div className="two">
+          <label>Currency<select value={cur} onChange={e => { setCur(e.target.value as 'USDC' | 'SOL'); if (amount === 'max') setAmount('max'); }}><option>USDC</option><option>SOL</option></select></label>
+          <label>Amount <span className="opt">{have == null ? '' : `you have ${have.toLocaleString('en-US', { maximumFractionDigits: cur === 'SOL' ? 4 : 2 })}`}</span>
+            <span className="amt"><input value={amount === 'max' ? 'All' : amount} onChange={e => setAmount(e.target.value.replace(',', '.'))} inputMode="decimal" placeholder="0.00" /><button type="button" className="lnk" onClick={() => setAmount('max')}>Max</button></span>
+          </label>
+        </div>
+        {needsPw ? <label>Your password<input type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} /></label>
+          : me?.profile.kind === 'account' ? <p className="fine">Signed in with Google: you need to have signed in within the last 15 minutes.</p> : null}
+        {to.trim() && !SOL_ADDR.test(to.trim()) && <p className="err">That does not look like a Solana address.</p>}
+        {err && <p className="err" role="alert">{err}</p>}
+        <button className="btn" type="submit" disabled={busy || !valid}>{busy ? <><Spinner label="Sending" />Sending…</> : `Send ${amount === 'max' ? 'all ' + cur : amount ? amount + ' ' + cur : cur}`}</button>
+      </form>
+      {sent && <p className="ok">Sent {sent.amount} {sent.currency} to {shortAddr(sent.to)}. <a href={ex(sent.signature)} target="_blank" rel="noreferrer">See the transaction ↗</a></p>}
+      <p className="fine">Check the address: transfers on Solana cannot be reversed.</p>
+    </div>
+  );
+}
+
 function WalletPanel() {
   const { me, toast, refresh } = useApp();
   const [w, setW] = useState<WalletInfo | null>(null);
@@ -311,6 +359,7 @@ function WalletPanel() {
 
       {w.custodial && (
         <div className="wside">
+          <SendMoney w={w} onSent={load} />
           {w.faucet && (
             <div className="setc">
               <h3 className="acc-h">Test SOL</h3>

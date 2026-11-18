@@ -256,3 +256,35 @@ export function withdrawTreasury(p: { to: string; currency: Currency; amount: nu
   queuePayout({ to: p.to, from: 'treasury', currency: p.currency, usd: p.currency === 'USDC' ? p.amount : 0, units, memo: 'treasury withdrawal' });
   return { ok: true };
 }
+
+/* ---------- the collector sends from their own wallet ---------- */
+
+/**
+ * Sends USDC or SOL from a collector's Space Rocks wallet to any Solana address. Real on the active
+ * network whatever the payment mode (the wallet and its balance are real). The vault pays the fee.
+ */
+export async function sendFromAccount(owner: string, to: string, currency: 'USDC' | 'SOL', amountIn: number | 'max') {
+  if (SIMULATED_CHAIN && !g.__srtestlive) fail(409, 'The chain is simulated on this server: there is nothing to send.');
+  const sol = await solana();
+  const from = custodialOf(owner) ?? fail(404, 'This account has no Space Rocks wallet: you signed in with your own.');
+  if (to === from) fail(400, 'That is this wallet\u2019s own address');
+  if ((await sol.balanceSol().catch(() => 0)) < 0.003) fail(503, 'Sending is paused for a moment (the network fee wallet is being topped up). Nothing was sent.');
+  const n = activeNetwork();
+  if (currency === 'SOL') {
+    const have = await sol.balanceOf(from);
+    const amount = amountIn === 'max' ? have : amountIn;
+    if (!(amount > 0)) fail(400, 'Enter an amount');
+    if (amount > have + 1e-9) fail(400, `You have ${have.toFixed(4)} SOL`);
+    const lamports = BigInt(Math.floor(amount * 1e9));
+    const signature = await sol.paySol({ secret: secretOf(owner), transfers: [{ to, lamports }] });
+    return { signature, currency, amount: Number(lamports) / 1e9, to, from };
+  }
+  const mint = sol.USDC_MINT[n];
+  const have = await sol.tokenBalance(from, mint);
+  const amount = amountIn === 'max' ? have : amountIn;
+  if (!(amount > 0)) fail(400, 'Enter an amount');
+  if (amount > have + 1e-9) fail(400, `You have ${have.toLocaleString('en-US', { maximumFractionDigits: 6 })} USDC`);
+  const units = BigInt(Math.floor(amount * 1e6 + 1e-6));
+  const signature = await sol.payTokens({ secret: secretOf(owner), mint, transfers: [{ to, units }] });
+  return { signature, currency, amount: Number(units) / 1e6, to, from };
+}

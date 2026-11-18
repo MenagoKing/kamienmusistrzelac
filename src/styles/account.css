@@ -198,3 +198,6 @@ a.wbtn{text-decoration:none}
 .wkey{display:block;margin:12px 0;padding:12px 14px;border-radius:12px;border:1px solid rgba(242,160,138,.35);background:rgba(0,0,0,.3);font:500 12px/1.5 'IBM Plex Mono',monospace;word-break:break-all;cursor:pointer;transition:filter .2s}
 .wkey.blur{filter:blur(6px);user-select:none}
 @media (max-width:900px){.wpanel{grid-template-columns:minmax(0,1fr)}.wbal b{font-size:40px}}
+
+.amt{display:flex;align-items:center;gap:8px}.amt input{flex:1;min-width:0}.amt .lnk{flex:none}
+.sendnft{margin-top:14px;padding:14px;border:1px solid var(--line);border-radius:14px}

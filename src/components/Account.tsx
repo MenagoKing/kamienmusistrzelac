@@ -337,16 +337,49 @@ function SoldAtSource({ h, r }: { h: Holding; r: Reservation }) {
   );
 }
 
+const SOL_ADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+/** Send the specimen's NFT to any address (another Space Rocks account gets it as a gift). */
+function SendNft({ h, linked }: { h: Holding; linked: string | null }) {
+  const { me, refresh, toast, close } = useApp();
+  const [open, setOpen] = useState(false);
+  const [to, setTo] = useState(linked ?? '');
+  const [pw, setPw] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const needsPw = !!me?.profile.has_password;
+  if (!open) return <div className="acts"><button className="btn line sm" type="button" onClick={() => setOpen(true)}>Send NFT to an address</button></div>;
+  const send = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy(true); setErr('');
+    try {
+      const r = await api<{ gift: boolean; to: string }>('POST', `/api/specimens/${h.id}/send`, { to: to.trim(), password: pw });
+      await refresh();
+      toast(r.gift ? `${h.name} is now in that collector’s account` : `Sending the NFT to ${r.to.slice(0, 4)}…${r.to.slice(-4)}`);
+      if (r.gift) close(); else setOpen(false);
+    } catch (er: any) { setErr(er.message); } finally { setBusy(false); }
+  };
+  return (
+    <form className="fm sendnft" onSubmit={send}>
+      <label>Send the NFT to<input value={to} onChange={e => setTo(e.target.value)} placeholder="Solana address" spellCheck={false} autoComplete="off" data-autofocus /></label>
+      {linked && to !== linked && <button type="button" className="lnk" onClick={() => setTo(linked)}>Use my linked wallet {linked.slice(0, 4)}…{linked.slice(-4)}</button>}
+      {needsPw && <label>Your password<input type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} /></label>}
+      <p className="fine">To another Space Rocks collector’s address it becomes theirs, with its reservation. To an outside wallet (Phantom, Solflare) the NFT moves there and the specimen stays in your account.</p>
+      {err && <p className="err" role="alert">{err}</p>}
+      <div className="acts">
+        <button className="btn" type="submit" disabled={busy || !SOL_ADDR.test(to.trim()) || (needsPw && !pw)}>{busy ? <><Spinner label="Sending" />Sending…</> : 'Send NFT'}</button>
+        <button className="btn line" type="button" onClick={() => setOpen(false)}>Cancel</button>
+      </div>
+    </form>
+  );
+}
+
 export function ItemDialog({ holding: h }: { holding: Holding }) {
   const { data, me, open, refresh, toast, close } = useApp();
   const [busy, setBusy] = useState(false);
   const done = h.file_done ?? [];
   const linked = me?.profile.linked_wallet;
   const r = liveReservation(h.reservation);
-  const withdraw = async () => {
-    setBusy(true);
-    try { await api('POST', `/api/specimens/${h.id}/withdraw`, {}); await refresh(); toast('Sending the NFT to your wallet'); } catch (e: any) { toast(e.message, 'err'); } finally { setBusy(false); }
-  };
   const value = h.reservation ? h.reservation.escrow_usd || h.reservation.reserved_price_usd : h.vault_value_usd ?? 0;
   const shipping = h.status.kind === 'redeeming';
   const unlist = async () => {
@@ -382,7 +415,7 @@ export function ItemDialog({ holding: h }: { holding: Holding }) {
           </ul>
           {r && !shipping && r.status === 'active' && <p className="fine src-line">Reserved for you. Sourced from an independent certified dealer, purchased and shipped when you redeem.</p>}
           <NftLine specimenId={h.id} />
-          {!shipping && linked && h.mint_status === 'minted' && h.nft_owner !== linked && <button type="button" className="lnk" disabled={busy} onClick={withdraw}>Send the NFT to my wallet {linked.slice(0, 4)}…{linked.slice(-4)}</button>}
+          {!shipping && h.status.kind === 'held' && !h.listing && r?.status !== 'sold_at_source' && <SendNft h={h} linked={linked ?? null} />}
           {shipping ? <p className="ok">On its way to you. Tracking is under Shipments.</p> : r?.status === 'sold_at_source' ? <SoldAtSource h={h} r={r} /> : h.listing ? (
             <div className="acts">
               <button className="btn line" type="button" disabled={busy} onClick={unlist}>{busy ? <><Spinner label="Working" />Working…</> : 'Take off sale'}</button>

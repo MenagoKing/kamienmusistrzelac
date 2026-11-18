@@ -66,6 +66,7 @@ export function statusOf(r: SpecimenRow): SpecimenStatus {
     case 'series': return { kind: 'in_series', series_id: r.series_id ?? '', sold_back: !!r.sold_back };
     case 'locked': return { kind: 'locked', drop_id: r.drop_id ?? '' };
     case 'held': return { kind: 'held' };
+    case 'external': return { kind: 'external', holder: r.nft_owner ?? '' };
     case 'redeeming': return { kind: 'redeeming' };
     case 'redeemed': return { kind: 'redeemed' };
   }

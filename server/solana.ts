@@ -13,7 +13,7 @@ import crypto from 'node:crypto';
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
 import { createSignerFromKeypair, generateSigner, keypairIdentity, publicKey, sol, transactionBuilder, type Signer, type TransactionBuilder, type Umi } from '@metaplex-foundation/umi';
 import { base58 } from '@metaplex-foundation/umi/serializers';
-import { burn, create, fetchAsset, mplCore, ruleSet, transfer } from '@metaplex-foundation/mpl-core';
+import { burn, create, fetchAsset, mplCore, ruleSet, safeFetchAllAssetV1, transfer } from '@metaplex-foundation/mpl-core';
 import { createIdempotentAssociatedToken, findAssociatedTokenPda, mplToolbox, setComputeUnitPrice, transferSol, transferTokens } from '@metaplex-foundation/mpl-toolbox';
 import { activeNetwork, ctlGet, netDir, type Network } from './db.ts';
 
@@ -180,6 +180,12 @@ export async function burnAsset(assetAddr: string): Promise<string> {
   const asset = await fetchAsset(u, publicKey(assetAddr));
   const r = await withFee(u, burn(u, { asset }), activeNetwork()).sendAndConfirm(u);
   return sig(r.signature);
+}
+
+/** Current holders of many NFTs at once (missing or burned assets are left out). */
+export async function readOwners(mints: string[], n: Network = activeNetwork()): Promise<Record<string, string>> {
+  const assets = await safeFetchAllAssetV1(umi(n), mints.map(m => publicKey(m)));
+  return Object.fromEntries(assets.map(a => [a.publicKey.toString(), a.owner.toString()]));
 }
 
 export async function readAsset(assetAddr: string) {

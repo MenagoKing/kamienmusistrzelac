@@ -25,6 +25,7 @@ export type SpecimenState =
   | 'series' // sealed into a series (a pack slot)
   | 'locked' // locked in a launch drop batch
   | 'held' // owned by a collector (NFT in their wallet)
+  | 'external' // the NFT is in a wallet no account controls: it belongs to whoever holds it
   | 'redeeming' // NFT burned, shipment being prepared
   | 'redeemed'; // shipped to the collector
 
@@ -35,6 +36,7 @@ export type SpecimenStatus =
   | { kind: 'in_vault'; sold_back?: boolean }
   | { kind: 'locked'; drop_id: string }
   | { kind: 'held' }
+  | { kind: 'external'; holder: string }
   | { kind: 'redeeming' }
   | { kind: 'redeemed' }
   | { kind: 'not_listed'; reason?: 'file_incomplete' };

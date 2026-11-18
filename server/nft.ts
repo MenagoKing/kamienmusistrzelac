@@ -181,3 +181,38 @@ export function migrateSimulatedMints() {
   }
   run("INSERT INTO settings (key, value) VALUES ('nft_v1', '1')");
 }
+
+/* ---------- the chain watcher: the site follows the NFT ---------- */
+// Every few minutes, reads who holds each minted NFT on-chain. If one moved (a sale elsewhere, a
+// transfer from Phantom with an exported key), the specimen follows it (server/holders.ts).
+const gw = globalThis as unknown as { __srownerwatch?: NodeJS.Timeout; __srownerbusy?: boolean };
+
+const watchOnce = () => pinNetwork(async () => {
+  if (SIMULATED || gw.__srownerbusy) return;
+  gw.__srownerbusy = true;
+  try {
+    const rows = all<{ id: string; mint: string; nft_owner: string | null }>(
+      "SELECT id, mint, nft_owner FROM specimens WHERE mint IS NOT NULL AND mint_status = 'minted' AND state IN ('held', 'external') AND id NOT IN (SELECT specimen_id FROM nft_jobs WHERE status IN ('pending', 'running'))");
+    if (!rows.length) return;
+    const sol = await import('./solana.ts');
+    const { nftMovedTo } = await import('./holders.ts');
+    for (let i = 0; i < rows.length; i += 100) {
+      const batch = rows.slice(i, i + 100);
+      const owners = await sol.readOwners(batch.map(r => r.mint));
+      for (const r of batch) {
+        const now = owners[r.mint];
+        if (now && now !== r.nft_owner) nftMovedTo(r.id, now, 'moved on-chain');
+      }
+    }
+  } catch (e: any) {
+    g.__srnote = 'Chain watcher: ' + String(e?.message ?? e).slice(0, 200);
+  } finally {
+    gw.__srownerbusy = false;
+  }
+});
+
+export function startOwnerWatch() {
+  if (gw.__srownerwatch) clearInterval(gw.__srownerwatch);
+  gw.__srownerwatch = setInterval(watchOnce, 3 * 60_000);
+  setTimeout(watchOnce, 20_000);
+}

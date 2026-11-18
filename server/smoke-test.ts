@@ -371,9 +371,31 @@ try {
     const out = await ok('POST', `/api/specimens/${free[1].id}/send`, { to: ext, password: 'evenlongerpass' }, 'p1');
     assert.equal(out.gift, false);
     await settle();
-    const kept = (await ok('GET', '/api/me', undefined, 'p1')).holdings.find((h: any) => h.id === free[1].id);
-    assert.equal(kept.nft_owner, ext, 'the NFT is in the outside wallet, the specimen stays in the account');
+    assert.equal(out.left, true);
+    assert.ok(!(await ok('GET', '/api/me', undefined, 'p1')).holdings.some((h: any) => h.id === free[1].id), 'whoever holds the NFT holds the specimen: it left the account');
+    const outside = await ok('GET', `/api/specimens/${free[1].id}`);
+    assert.equal(outside.status.kind, 'external');
+    assert.equal(outside.status.holder, ext);
     console.log('send money and NFTs ok');
+
+    // the holder of that wallet claims it by linking the wallet (signature checked in linkWallet; set directly here)
+    const db2 = await import('./db.ts');
+    const holders = await import('./holders.ts');
+    await ok('POST', '/api/auth/register', { username: 'outside_holder', email: 'oh@example.com', password: 'longpassword' }, 'oh');
+    const oh = (await ok('GET', '/api/me', undefined, 'oh')).address;
+    db2.run('UPDATE users SET linked_wallet = ? WHERE address = ?', ext, oh);
+    assert.equal(holders.claimByWallet(ext), 1);
+    assert.ok((await ok('GET', '/api/me', undefined, 'oh')).holdings.some((h: any) => h.id === free[1].id), 'claimed by linking the wallet');
+    // the NFT moves on-chain to another collector's wallet (seen by the watcher): the specimen follows
+    holders.nftMovedTo(free[1].id, p2addr, 'moved on-chain');
+    assert.ok((await ok('GET', '/api/me', undefined, 'p2')).holdings.some((h: any) => h.id === free[1].id));
+    assert.ok(!(await ok('GET', '/api/me', undefined, 'oh')).holdings.some((h: any) => h.id === free[1].id));
+    // an NFT in a linked wallet is the account's; unlinking the wallet lets the specimen go
+    holders.nftMovedTo(free[1].id, ext, 'moved on-chain');
+    assert.ok((await ok('GET', '/api/me', undefined, 'oh')).holdings.some((h: any) => h.id === free[1].id), 'back in the linked wallet');
+    await ok('POST', '/api/me/unlink-wallet', {}, 'oh');
+    assert.equal((await ok('GET', `/api/specimens/${free[1].id}`)).status.kind, 'external');
+    console.log('NFT holder owns the specimen ok');
   }
 
   // ---- devnet / mainnet: separate data, admin switch ----

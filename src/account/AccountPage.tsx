@@ -196,7 +196,7 @@ function Achievements() {
   );
 }
 
-const ACT: Record<string, string> = { market_buy: 'Bought on the market', reservation: 'Reserved on the market', reservation_cancel: 'Reservation cancelled, rock price back', reservation_refund: 'Refunded in full (sold at source)', replacement_refund: 'Replacement, difference back', price_difference_refund: 'Dealer price lower, difference back', price_difference_topup: 'Dealer price higher, difference paid', escrow_release: 'Escrow paid the dealer', pack: 'Opened a pack', raffle: 'Won a drop raffle', secondary_sale: 'Bought from a collector', seller_payout: 'Sold to a collector', buyback: 'Sold back', redemption_fee: 'Shipping and handling', redemption_refund: 'Redemption refunded' };
+const ACT: Record<string, string> = { nft_received: 'Received a specimen (its NFT came to you)', nft_left: 'Specimen left (its NFT went to an outside wallet)', nft_gift_in: 'Received as a gift', nft_gift_out: 'Gave a specimen', wallet_withdrawal: 'Sent from your wallet', market_buy: 'Bought on the market', reservation: 'Reserved on the market', reservation_cancel: 'Reservation cancelled, rock price back', reservation_refund: 'Refunded in full (sold at source)', replacement_refund: 'Replacement, difference back', price_difference_refund: 'Dealer price lower, difference back', price_difference_topup: 'Dealer price higher, difference paid', escrow_release: 'Escrow paid the dealer', pack: 'Opened a pack', raffle: 'Won a drop raffle', secondary_sale: 'Bought from a collector', seller_payout: 'Sold to a collector', buyback: 'Sold back', redemption_fee: 'Shipping and handling', redemption_refund: 'Redemption refunded' };
 const INCOMING = new Set(['seller_payout', 'buyback', 'redemption_refund', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund']);
 
 function ActivityList() {
@@ -354,6 +354,7 @@ function WalletPanel() {
         <p className="fine">{w.custodial
           ? `Created with your account. Every specimen you get is minted here as an NFT, and Space Rocks pays the network fees.${w.payments === 'live' ? ' Purchases are paid from this wallet: send USDC (or SOL) to the address above to top it up.' : ''}`
           : 'Your specimens are minted straight to this wallet.'}</p>
+        <p className="fine">Whoever holds a specimen’s NFT holds the specimen. Bought a Space Rocks NFT on another marketplace? Link the wallet that holds it in Settings and the specimen appears in your collection.</p>
         {w.custodial && w.cluster === 'devnet' && <p className="fine">Devnet test funds: <a href="https://faucet.circle.com" target="_blank" rel="noreferrer">USDC at faucet.circle.com</a> (choose Solana Devnet) · <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">SOL at faucet.solana.com</a></p>}
       </div>
 
@@ -481,7 +482,7 @@ function Settings() {
           </>
         ) : (
           <>
-            <p className="dlg-p">Your NFTs are in your Space Rocks wallet (see the Wallet tab). Link Phantom, Solflare or Backpack to send them there instead.</p>
+            <p className="dlg-p">Whoever holds a specimen’s NFT holds the specimen. Link Phantom, Solflare or Backpack (you sign once to prove it is yours): NFTs you send there stay yours, and any Space Rocks NFT already in it, bought on another marketplace for example, comes into your collection.</p>
             <div className="wl tight">{WALLETS.map(w => w.detect() ? <button key={w.id} className="wrow" type="button" onClick={() => link(w.id)} disabled={busy === 'wallet'}><b>{w.name}</b><span className="mono">Link</span></button> : <a key={w.id} className="wrow off" href={w.url} target="_blank" rel="noreferrer"><b>{w.name}</b><span className="mono">Install ↗</span></a>)}</div>
           </>
         )}

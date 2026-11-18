@@ -10,7 +10,7 @@ const rockOf = (s: Partial<SpecimenAdmin>) => (s.dealer_id ? s.dealer_price_usd 
 
 export type SpecRow = SpecimenAdmin & { file_complete: boolean; photo: string | null };
 
-const STATES = ['draft', 'vault', 'market', 'series', 'locked', 'held', 'redeeming', 'redeemed'];
+const STATES = ['draft', 'vault', 'market', 'series', 'locked', 'held', 'external', 'redeeming', 'redeemed'];
 const CATS: RockType[] = ['stone', 'iron', 'pallasite', 'lunar', 'martian'];
 
 export function Thumb({ s, size = 44 }: { s: { category: RockType; render_seed: number; photo?: string | null }; size?: number }) {

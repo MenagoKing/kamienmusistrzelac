@@ -88,6 +88,7 @@ const TONE: Record<string, string> = {
   open: 'green', upcoming: 'amber', sold_out: 'grey', closed: 'grey', scheduled: 'amber',
   requested: 'amber', ordered: 'violet', packing: 'blue', shipped: 'green', delivered: 'grey', cancelled: 'mute',
   reservation: 'green', reservation_cancel: 'amber', reservation_refund: 'mute', replacement_refund: 'mute', price_difference_refund: 'mute', price_difference_topup: 'blue', escrow_release: 'violet',
+  external: 'violet', nft_received: 'green', nft_left: 'amber', nft_gift_in: 'green', nft_gift_out: 'amber', wallet_withdrawal: 'mute',
   sold_at_source: 'red', replaced: 'grey', refunded: 'mute',
   esc_locked: 'amber', esc_released: 'violet', esc_refunded: 'mute', esc_lock: 'amber', esc_refund: 'mute', esc_topup: 'blue', esc_move: 'grey', esc_release: 'violet', dealer: 'violet', own: 'grey',
   pack: 'green', market_buy: 'green', secondary_sale: 'violet', seller_payout: 'amber', buyback: 'amber', active: 'green', sold: 'grey', account: 'blue', redemption_fee: 'blue', redemption_refund: 'mute', raffle: 'violet',

@@ -11,6 +11,7 @@ import { DAY, WALLET_COOKIE, newSession, sessionAge, touchWallet, verifyWalletSi
 import { ledger } from './ops.ts';
 import { nftOwnerOf, queueTransfer } from './nft.ts';
 import { moveReservation } from './sources.ts';
+import { claimByWallet, nftMovedTo, releaseByWallet } from './holders.ts';
 import { createWallet, custodialOf, faucetAt, markExported, markFaucet, secretOf } from './custody.ts';
 import { b58encode, fail, str } from './util.ts';
 
@@ -130,10 +131,13 @@ export function linkWallet(address: string, b: any) {
   ensureUser(address);
   if (get('SELECT 1 FROM users WHERE linked_wallet = ? AND address != ?', wallet, address)) fail(409, 'This wallet is linked to another account');
   run('UPDATE users SET linked_wallet = ? WHERE address = ?', wallet, address);
+  claimByWallet(wallet); // specimens whose NFT sits in this wallet are now this account's
   return profileOf(address);
 }
 
 export function unlinkWallet(address: string) {
+  const linked = userRow(address)?.linked_wallet;
+  if (linked) releaseByWallet(address, linked); // their NFTs stay in that wallet, so the specimens leave the account
   run('UPDATE users SET linked_wallet = NULL WHERE address = ?', address);
   return profileOf(address);
 }
@@ -217,7 +221,7 @@ export function profileOf(address: string): Profile {
   };
 }
 
-const ACT_KINDS = ['wallet_withdrawal', 'nft_gift_out', 'nft_gift_in', 'nft_sent', 'market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund', 'reservation', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund', 'price_difference_topup'];
+const ACT_KINDS = ['wallet_withdrawal', 'nft_gift_out', 'nft_gift_in', 'nft_sent', 'nft_received', 'nft_left', 'market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund', 'reservation', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund', 'price_difference_topup'];
 
 export function activityOf(address: string): Activity[] {
   return all<any>(`SELECT l.id, l.kind, l.usd, l.specimen_id, s.name specimen_name, l.created_at FROM ledger l LEFT JOIN specimens s ON s.id = l.specimen_id
@@ -354,8 +358,9 @@ export function sendNft(req: IncomingMessage, address: string, id: string, b: an
       ledger('nft_gift_in', { wallet: recipient, specimen_id: id, usd: 0, currency: 'USDC', amount: 0, split: { from: address } });
       return { ok: true, gift: true, to };
     }
+    // an outside wallet: the NFT goes there and the specimen with it (unless it is this account's own linked wallet)
     queueTransfer(id, to);
-    ledger('nft_sent', { wallet: address, specimen_id: id, usd: 0, currency: 'USDC', amount: 0, split: { to } });
-    return { ok: true, gift: false, to };
+    const r = nftMovedTo(id, to, 'sent');
+    return { ok: true, gift: false, to, left: r?.owner !== address };
   });
 }

@@ -35,6 +35,7 @@ export function whereLabel(s: Specimen, rules: Rules) {
     case 'in_vault': return s.status.sold_back ? 'Vault · next series' : 'Vault';
     case 'locked': return 'Launch drop';
     case 'held': return (s.sourced ? 'Reserved · ' : 'Collector · ') + (s.owner ?? '');
+    case 'external': return 'Outside wallet · ' + (s.status.holder ? s.status.holder.slice(0, 4) + '…' + s.status.holder.slice(-4) : '');
     case 'redeeming': return 'Being shipped';
     case 'redeemed': return 'Shipped';
     case 'not_listed': return 'Not listed';
@@ -49,6 +50,7 @@ export function statusPill(st: SpecimenStatus): [string, string] {
     case 'in_vault': return st.sold_back ? ['ser', 'Sold back, next series'] : ['pend', 'In the vault'];
     case 'locked': return ['ser', 'Locked in a drop'];
     case 'held': return ['held', 'Reserved'];
+    case 'external': return ['held', 'In an outside wallet'];
     case 'redeeming': return ['red', 'Shipping'];
     case 'redeemed': return ['red', 'Redeemed'];
     case 'not_listed': return ['pend', 'File incomplete'];

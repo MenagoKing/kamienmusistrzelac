@@ -126,6 +126,7 @@ export function walletVerify(res: ServerResponse, body: any) {
   const address = verifyWalletSignature(body);
   const kind = ['phantom', 'solflare', 'backpack'].includes(body?.wallet) ? body.wallet : 'wallet';
   touchWallet(address, kind);
+  void import('./holders.ts').then(h => h.claimByWallet(address)); // NFTs in this wallet: their specimens are this collector's
   newSession(res, WALLET_COOKIE, address, 'wallet', 30 * DAY);
   return { address, kind };
 }

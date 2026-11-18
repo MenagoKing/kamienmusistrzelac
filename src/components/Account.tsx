@@ -355,8 +355,8 @@ function SendNft({ h, linked }: { h: Holding; linked: string | null }) {
     try {
       const r = await api<{ gift: boolean; to: string }>('POST', `/api/specimens/${h.id}/send`, { to: to.trim(), password: pw });
       await refresh();
-      toast(r.gift ? `${h.name} is now in that collector’s account` : `Sending the NFT to ${r.to.slice(0, 4)}…${r.to.slice(-4)}`);
-      if (r.gift) close(); else setOpen(false);
+      toast(r.gift ? `${h.name} is now in that collector’s account` : (r as any).left ? `${h.name} left your account with its NFT` : `Sending the NFT to your wallet ${r.to.slice(0, 4)}…${r.to.slice(-4)}`);
+      if (r.gift || (r as any).left) close(); else setOpen(false);
     } catch (er: any) { setErr(er.message); } finally { setBusy(false); }
   };
   return (
@@ -364,7 +364,7 @@ function SendNft({ h, linked }: { h: Holding; linked: string | null }) {
       <label>Send the NFT to<input value={to} onChange={e => setTo(e.target.value)} placeholder="Solana address" spellCheck={false} autoComplete="off" data-autofocus /></label>
       {linked && to !== linked && <button type="button" className="lnk" onClick={() => setTo(linked)}>Use my linked wallet {linked.slice(0, 4)}…{linked.slice(-4)}</button>}
       {needsPw && <label>Your password<input type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} /></label>}
-      <p className="fine">To another Space Rocks collector’s address it becomes theirs, with its reservation. To an outside wallet (Phantom, Solflare) the NFT moves there and the specimen stays in your account.</p>
+      <p className="fine">Whoever holds the NFT holds the specimen. To another collector’s address it becomes theirs. To an outside wallet it leaves your account and belongs to whoever holds that wallet: to bring it back, link that wallet in Settings. To your own linked wallet it stays yours.</p>
       {err && <p className="err" role="alert">{err}</p>}
       <div className="acts">
         <button className="btn" type="submit" disabled={busy || !SOL_ADDR.test(to.trim()) || (needsPw && !pw)}>{busy ? <><Spinner label="Sending" />Sending…</> : 'Send NFT'}</button>

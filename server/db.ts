@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS nft_jobs (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS nft_jobs_status ON nft_jobs(status);
+CREATE TABLE IF NOT EXISTS custody (owner TEXT PRIMARY KEY, pubkey TEXT NOT NULL UNIQUE, secret_enc TEXT NOT NULL, created_at TEXT NOT NULL, faucet_at TEXT, exported_at TEXT);
 CREATE TABLE IF NOT EXISTS dealers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, country TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'OTHER',
   ship_domestic_usd REAL NOT NULL DEFAULT 15, ship_region_usd REAL NOT NULL DEFAULT 28, ship_world_usd REAL NOT NULL DEFAULT 45,
@@ -152,6 +153,7 @@ addColumn('redemptions', 'dealer_order_ref', "TEXT NOT NULL DEFAULT ''");
 addColumn('redemptions', 'due_at', 'TEXT');
 addColumn('redemptions', 'shipping_usd', 'REAL');
 addColumn('redemptions', 'price_delta_usd', 'REAL');
+addColumn('sessions', 'created_at', 'INTEGER NOT NULL DEFAULT 0');
 
 export const all = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).all(...p) as T[];
 export const get = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).get(...p) as T | undefined;

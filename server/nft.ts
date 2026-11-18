@@ -2,7 +2,8 @@
 // default). Purchases never wait for the chain: they queue a job and a worker mints, transfers or burns
 // in order, retrying on errors. With CHAIN=simulated (tests) jobs complete instantly with fake addresses.
 //
-// Where the NFT goes: the collector's linked Solana wallet if they linked one, else their vault address.
+// Where the NFT goes: the collector's linked Solana wallet if they linked one, else their account's
+// own wallet (server/custody.ts), else the address they signed in with.
 import { all, get, now, run } from './db.ts';
 import { getRules, specimenRow } from './store.ts';
 import { randomB58 } from './util.ts';
@@ -14,7 +15,9 @@ interface Job { id: number; specimen_id: string; action: 'mint' | 'transfer' | '
 
 /** The address that should hold a collector's NFTs. */
 export function nftOwnerOf(account: string) {
-  return get<{ linked_wallet: string | null }>('SELECT linked_wallet FROM users WHERE address = ?', account)?.linked_wallet ?? account;
+  return get<{ linked_wallet: string | null }>('SELECT linked_wallet FROM users WHERE address = ?', account)?.linked_wallet
+    ?? get<{ pubkey: string }>('SELECT pubkey FROM custody WHERE owner = ?', account)?.pubkey
+    ?? account;
 }
 
 const pendingMint = (specimenId: string) => get<Job>("SELECT * FROM nft_jobs WHERE specimen_id = ? AND action = 'mint' AND status IN ('pending', 'failed') ORDER BY id DESC LIMIT 1", specimenId);

@@ -157,6 +157,51 @@ try {
   assert.ok(wl.some((w: any) => w.username === 'meteor_mike'));
   console.log('accounts + collector market ok');
 
+  // ---- every account has its own Solana wallet ----
+  {
+    const crypto = await import('node:crypto');
+    const { b58decode, b58encode, randomB58 } = await import('./util.ts');
+    const db = await import('./db.ts');
+    await settle();
+    const me1 = await ok('GET', '/api/me', undefined, 'p1');
+    assert.equal(me1.profile.wallet, me1.address, 'a new account uses its wallet address');
+    assert.ok(me1.holdings.length && me1.holdings.every((h: any) => h.nft_owner === me1.address), 'NFTs are minted to the account wallet');
+    const w = await ok('GET', '/api/me/wallet', undefined, 'p1');
+    assert.equal(w.address, me1.address);
+    assert.ok(w.custodial && w.export.needs_password && w.faucet === null);
+    assert.equal(w.cluster, 'simulated');
+    assert.equal((await call('POST', '/api/me/wallet/export', { password: 'nope' }, 'p1')).status, 401);
+    const ex = await ok('POST', '/api/me/wallet/export', { password: 'evenlongerpass' }, 'p1');
+    const secret = Buffer.from(b58decode(ex.secret_base58));
+    assert.equal(secret.length, 64);
+    assert.deepEqual(JSON.parse(ex.secret_json), [...secret]);
+    // the exported key really controls the address
+    const key = crypto.createPrivateKey({ key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), secret.subarray(0, 32)]), format: 'der', type: 'pkcs8' });
+    assert.equal(b58encode(crypto.createPublicKey(key).export({ format: 'der', type: 'spki' }).subarray(-32)), ex.address);
+    const stored = db.get<{ secret_enc: string }>('SELECT secret_enc FROM custody WHERE owner = ?', me1.address)!.secret_enc;
+    assert.ok(!stored.includes(ex.secret_base58) && Buffer.from(stored, 'base64').length === 12 + 16 + 64, 'the key is stored encrypted');
+    assert.equal((await call('POST', '/api/me/wallet/faucet', {}, 'p1')).status, 409, 'no test SOL on the simulated chain');
+    // demo sessions get a wallet too; sample collectors do not
+    await ok('POST', '/api/auth/demo', {}, 'd1');
+    const dw = await ok('GET', '/api/me/wallet', undefined, 'd1');
+    assert.ok(dw.custodial && dw.export.needs_password === false);
+    await ok('POST', '/api/me/wallet/export', {}, 'd1');
+    assert.equal(db.get<{ n: number }>("SELECT COUNT(*) n FROM custody c JOIN wallets w ON w.address = c.owner WHERE w.kind = 'sample'")!.n, 0);
+    // older accounts get one at start-up, and their queued NFTs follow
+    const { backfillWallets } = await import('./custody.ts');
+    const { queueTransfer } = await import('./nft.ts');
+    const old = randomB58(32);
+    db.run("INSERT INTO wallets (address, kind, created_at, last_seen) VALUES (?, 'account', ?, ?)", old, db.now(), db.now());
+    db.run("INSERT INTO nft_jobs (specimen_id, action, owner, status, created_at, updated_at) VALUES ('SR-OLD', 'mint', ?, 'failed', ?, ?)", old, db.now(), db.now());
+    assert.ok(backfillWallets(queueTransfer) >= 1);
+    const pk = db.get<{ pubkey: string }>('SELECT pubkey FROM custody WHERE owner = ?', old)!.pubkey;
+    assert.ok(pk && pk !== old);
+    assert.equal(db.get<{ owner: string }>("SELECT owner FROM nft_jobs WHERE specimen_id = 'SR-OLD'")!.owner, pk);
+    const ow = await ok('GET', '/api/admin/wallets', undefined, 'admin');
+    assert.ok(ow.find((x: any) => x.address === me1.address)?.sol_wallet === me1.address);
+    console.log('account wallets ok');
+  }
+
   // ---- Addendum 1 rules end to end ----
   const mk = await ok('GET', '/api/page');
   const markup = mk.rules.market_markup;

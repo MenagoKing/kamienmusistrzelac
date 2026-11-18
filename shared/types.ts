@@ -118,6 +118,8 @@ export interface Profile {
   has_password: boolean;
   avatar_seed: number;
   linked_wallet: string | null;
+  /** The account's own Solana wallet, created with the account (null when they signed in with their own wallet). */
+  wallet: string | null;
   kind: string;
   created_at: string;
   level: number;
@@ -129,6 +131,21 @@ export interface Profile {
   stats: { held: number; value: number; packs: number; hits: number; sold: number; earned: number; redeemed: number };
   book: { type: RockType; label: string; held: number; ever: boolean }[];
   achievements: Achievement[];
+}
+
+/** GET /api/me/wallet */
+export interface WalletInfo {
+  address: string;
+  custodial: boolean;
+  cluster: string;
+  balance_sol: number | null;
+  error: string | null;
+  nfts_on_chain: number;
+  nfts_pending: number;
+  linked_wallet: string | null;
+  explorer: string;
+  faucet: { next_at: string | null } | null;
+  export: { needs_password: boolean; needs_fresh_sign_in: boolean } | null;
 }
 
 export interface Activity { id: string; kind: string; usd: number; specimen_id: string | null; specimen_name: string | null; created_at: string }

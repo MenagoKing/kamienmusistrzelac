@@ -7,7 +7,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Achievement, Activity, Profile, RockType } from '../shared/types.ts';
 import { CATEGORY_NAME } from '../shared/rules.ts';
 import { all, get, now, run, tx } from './db.ts';
-import { DAY, WALLET_COOKIE, newSession, touchWallet, verifyWalletSignature } from './auth.ts';
+import { DAY, WALLET_COOKIE, newSession, sessionAge, touchWallet, verifyWalletSignature } from './auth.ts';
+import { createWallet, custodialOf, faucetAt, markExported, markFaucet, secretOf } from './custody.ts';
 import { b58encode, fail, str } from './util.ts';
 
 interface UserRow { address: string; username: string | null; email: string | null; password_hash: string | null; avatar_seed: number; linked_wallet: string | null; created_at: string; last_login: string | null }
@@ -70,8 +71,9 @@ export function register(req: IncomingMessage, res: ServerResponse, b: any) {
   const seed = Number.isFinite(Number(b?.avatar_seed)) ? Math.abs(Math.round(Number(b.avatar_seed))) % 100000 : Math.floor(Math.random() * 100000);
   if (taken('username', username)) { t.bad(); fail(409, 'That callsign is taken'); }
   if (taken('email', email)) { t.bad(); fail(409, 'An account with this email already exists. Sign in instead.'); }
-  const address = b58encode(crypto.randomBytes(32)); // the account's vault address
+  let address = '';
   tx(() => {
+    address = createWallet(); // the account's own Solana wallet; its address is the account address
     touchWallet(address, 'account');
     run('INSERT INTO users (address, username, email, password_hash, avatar_seed, created_at, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)', address, username, email, hashPassword(password), seed, now(), now());
   });
@@ -198,6 +200,7 @@ export function profileOf(address: string): Profile {
     has_password: !!u?.password_hash,
     avatar_seed: u?.avatar_seed ?? (parseInt(address.slice(0, 6), 36) % 100000 || 1),
     linked_wallet: u?.linked_wallet ?? null,
+    wallet: custodialOf(address),
     kind: w?.kind ?? 'wallet',
     created_at: u?.created_at ?? w?.created_at ?? now(),
     level, xp,
@@ -216,4 +219,78 @@ const ACT_KINDS = ['market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_pay
 export function activityOf(address: string): Activity[] {
   return all<any>(`SELECT l.id, l.kind, l.usd, l.specimen_id, s.name specimen_name, l.created_at FROM ledger l LEFT JOIN specimens s ON s.id = l.specimen_id
     WHERE l.wallet = ? AND l.kind IN (${ACT_KINDS.map(() => '?').join(',')}) ORDER BY l.created_at DESC LIMIT 100`, address, ...ACT_KINDS);
+}
+
+/* ---------- the account's own Solana wallet ---------- */
+
+const CLUSTER = () => (process.env.CHAIN === 'simulated' ? 'simulated' : process.env.SOLANA_CLUSTER || 'devnet');
+const FAUCET_EVERY = 6 * 3600e3;
+const withTimeout = <T>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, rej) => setTimeout(() => rej(new Error('The Solana network did not answer in time')), ms))]);
+const exportAllowed = () => CLUSTER() !== 'mainnet-beta' || process.env.ALLOW_KEY_EXPORT === '1';
+
+/** Address, balance and NFTs of the collector's wallet (their own wallet if they signed in with one). */
+export async function walletInfo(address: string) {
+  const kind = get<{ kind: string }>('SELECT kind FROM wallets WHERE address = ?', address)?.kind ?? 'wallet';
+  let pk = custodialOf(address);
+  if (!pk && (kind === 'account' || kind === 'demo')) pk = createWallet(address); // accounts always have one
+  const own = pk ?? address;
+  const u = userRow(address);
+  const cluster = CLUSTER();
+  let balance: number | null = null, error: string | null = null;
+  if (cluster !== 'simulated') {
+    try { const sol = await import('./solana.ts'); balance = await withTimeout(sol.balanceOf(own), 8000); } catch (e: any) { error = String(e?.message ?? e).slice(0, 200); }
+  }
+  const last = pk ? faucetAt(address) : null;
+  const next = last ? Date.parse(last) + FAUCET_EVERY : 0;
+  return {
+    address: own, custodial: !!pk, cluster, balance_sol: balance, error,
+    nfts_on_chain: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE nft_owner = ? AND mint IS NOT NULL AND state IN ('held', 'redeeming')", own)!.n,
+    nfts_pending: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE owner = ? AND mint_status = 'pending'", address)!.n,
+    linked_wallet: u?.linked_wallet ?? null,
+    explorer: `https://explorer.solana.com/address/${own}${cluster === 'mainnet-beta' ? '' : `?cluster=${cluster === 'simulated' ? 'devnet' : cluster}`}`,
+    faucet: pk && cluster !== 'mainnet-beta' && cluster !== 'simulated' ? { next_at: next > Date.now() ? new Date(next).toISOString() : null } : null,
+    export: pk && exportAllowed() ? { needs_password: !!u?.password_hash, needs_fresh_sign_in: !u?.password_hash && kind !== 'demo' } : null,
+  };
+}
+
+/**
+ * Devnet test SOL for the collector's wallet: the public faucet first, then a little from the vault
+ * authority if the faucet refuses. Once every 6 hours per account.
+ */
+export async function walletFaucet(address: string) {
+  const pk = custodialOf(address) ?? fail(404, 'This account has no Space Rocks wallet');
+  const cluster = CLUSTER();
+  if (cluster === 'simulated') fail(409, 'The chain is simulated on this server: there is no test SOL to send.');
+  if (cluster === 'mainnet-beta') fail(403, 'Test SOL is only for devnet.');
+  const last = faucetAt(address);
+  if (last && Date.parse(last) + FAUCET_EVERY > Date.now()) fail(429, `You can ask for test SOL again at ${new Date(Date.parse(last) + FAUCET_EVERY).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} UTC.`);
+  const sol = await import('./solana.ts');
+  try {
+    await withTimeout(sol.airdropTo(pk!, 1), 25000);
+    markFaucet(address);
+    return { source: 'faucet', amount_sol: 1, signature: null, balance_sol: await sol.balanceOf(pk!).catch(() => null) };
+  } catch { /* the public faucet is often rate-limited: fall back to the vault */ }
+  const spare = await withTimeout(sol.balanceSol(), 8000).catch(() => 0);
+  if (spare < 0.3) fail(503, `The devnet faucet is busy and the vault has no spare SOL. Paste your address ${pk} at https://faucet.solana.com to get test SOL.`);
+  const signature = await withTimeout(sol.sendSol(pk!, 0.05), 40000);
+  markFaucet(address);
+  return { source: 'vault', amount_sol: 0.05, signature, balance_sol: await sol.balanceOf(pk!).catch(() => null) };
+}
+
+/** The wallet's private key, for importing it into Phantom or Solflare. Needs the password (or a fresh sign-in). */
+export function walletExport(req: IncomingMessage, address: string, b: any) {
+  if (!exportAllowed()) fail(403, 'Key export is turned off on mainnet.');
+  const pk = custodialOf(address) ?? fail(404, 'This account has no Space Rocks wallet: you signed in with your own.');
+  const t = throttle(req);
+  const u = userRow(address);
+  const kind = get<{ kind: string }>('SELECT kind FROM wallets WHERE address = ?', address)?.kind;
+  if (u?.password_hash) {
+    if (!checkPassword(typeof b?.password === 'string' ? b.password : '', u.password_hash)) { t.bad(); fail(401, 'Wrong password'); }
+  } else if (kind !== 'demo' && sessionAge(req) > 15 * 60e3) {
+    fail(403, 'For your safety, sign out and sign in again, then export within 15 minutes.');
+  }
+  t.ok();
+  const secret = secretOf(address);
+  markExported(address);
+  return { address: pk, secret_base58: b58encode(secret), secret_json: JSON.stringify([...secret]) };
 }

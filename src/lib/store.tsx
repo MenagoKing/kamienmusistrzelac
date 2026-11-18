@@ -79,4 +79,8 @@ export function useApp() {
 }
 
 /** Display name for the signed-in collector. */
-export const callsign = (me: Me | null) => me?.profile.username ?? (me ? me.address.slice(0, 4) + '…' + me.address.slice(-4) : '');
+export const callsign = (me: Me | null) => {
+  if (!me) return '';
+  const a = me.profile.wallet ?? me.address;
+  return me.profile.username ?? a.slice(0, 4) + '…' + a.slice(-4);
+};

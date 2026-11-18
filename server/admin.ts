@@ -586,7 +586,7 @@ export function updateRedemption(actor: string, id: string, b: any) {
 /* ---------- wallets, ledger, waitlist, audit ---------- */
 
 export function listWallets() {
-  return all<any>(`SELECT w.*, u.username, u.email, (SELECT COUNT(*) FROM specimens s WHERE s.owner = w.address AND s.state = 'held') holdings,
+  return all<any>(`SELECT w.*, u.username, u.email, (SELECT pubkey FROM custody c WHERE c.owner = w.address) sol_wallet, (SELECT COUNT(*) FROM specimens s WHERE s.owner = w.address AND s.state = 'held') holdings,
     (SELECT COUNT(*) FROM pulls p WHERE p.wallet = w.address AND p.bonus = 0) pulls,
     (SELECT coalesce(SUM(usd), 0) FROM ledger l WHERE l.wallet = w.address AND l.usd > 0) spent
     FROM wallets w LEFT JOIN users u ON u.address = w.address ORDER BY w.last_seen DESC`);
@@ -594,7 +594,7 @@ export function listWallets() {
 
 export function walletDetail(address: string) {
   return {
-    wallet: get<any>('SELECT w.*, u.username, u.email, u.linked_wallet, u.last_login FROM wallets w LEFT JOIN users u ON u.address = w.address WHERE w.address = ?', address) ?? fail(404, 'Wallet not found'),
+    wallet: get<any>('SELECT w.*, u.username, u.email, u.linked_wallet, u.last_login, (SELECT pubkey FROM custody c WHERE c.owner = w.address) sol_wallet, (SELECT exported_at FROM custody c WHERE c.owner = w.address) key_exported_at FROM wallets w LEFT JOIN users u ON u.address = w.address WHERE w.address = ?', address) ?? fail(404, 'Wallet not found'),
     holdings: all<SpecimenRow>('SELECT * FROM specimens WHERE owner = ? ORDER BY acquired_at DESC', address).map(toAdmin),
     ledger: all<any>('SELECT * FROM ledger WHERE wallet = ? ORDER BY created_at DESC', address),
   };

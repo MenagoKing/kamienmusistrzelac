@@ -7,6 +7,8 @@ import { DEFAULT_RULES, bandOf } from '../shared/rules.ts';
 import { all, db, get, now, run, tx } from './db.ts';
 import { addSlots, openPack } from './ops.ts';
 import { migrateDealerModel } from './sources.ts';
+import { backfillWallets } from './custody.ts';
+import { queueTransfer } from './nft.ts';
 import { seriesRow } from './store.ts';
 import { b58encode, randomHex, sha256 } from './util.ts';
 import crypto from 'node:crypto';
@@ -139,12 +141,13 @@ export function ensureSeeded() {
   if (!get('SELECT 1 FROM specimens LIMIT 1')) seed();
   topUpMarket();
   migrateDealerModel();
+  backfillWallets(queueTransfer);
   // Mars Window: exclusive until the current Earth-Mars launch window closes (dev note).
   run("UPDATE series SET ends_at = '2026-12-31T23:59:59Z' WHERE id = 'MW' AND ends_at IS NULL");
 }
 
 export function reseed() {
-  const tables = all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('sessions', 'sqlite_sequence')").map(t => t.name);
+  const tables = all<{ name: string }>("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT IN ('sessions', 'custody', 'sqlite_sequence')").map(t => t.name);
   tx(() => { for (const t of tables) db.exec(`DELETE FROM ${t}`); });
   seed();
   topUpMarket();

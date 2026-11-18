@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { createUmi } from '@metaplex-foundation/umi-bundle-defaults';
-import { generateSigner, keypairIdentity, publicKey, sol, type Umi } from '@metaplex-foundation/umi';
+import { generateSigner, keypairIdentity, publicKey, sol, transactionBuilder, type Umi } from '@metaplex-foundation/umi';
 import { base58 } from '@metaplex-foundation/umi/serializers';
 import { burn, create, fetchAsset, mplCore, ruleSet, transfer } from '@metaplex-foundation/mpl-core';
 import { DATA_DIR } from './db.ts';
@@ -52,6 +52,34 @@ export async function airdrop(amountSol = 1) {
   if (CLUSTER === 'mainnet-beta') throw new Error('No airdrops on mainnet');
   await umi().rpc.airdrop(umi().identity.publicKey, sol(amountSol));
   return balanceSol();
+}
+
+/** SOL balance of any address. */
+export async function balanceOf(address: string) {
+  const b = await umi().rpc.getBalance(publicKey(address));
+  return Number(b.basisPoints) / 1e9;
+}
+
+/** Devnet: asks the public faucet to send SOL to an address (often rate-limited). */
+export async function airdropTo(address: string, amountSol: number) {
+  if (CLUSTER === 'mainnet-beta') throw new Error('No airdrops on mainnet');
+  await umi().rpc.airdrop(publicKey(address), sol(amountSol));
+}
+
+/** Sends SOL from the vault authority (devnet test SOL for collectors). */
+export async function sendSol(to: string, amountSol: number): Promise<string> {
+  const u = umi();
+  const data = new Uint8Array(12);
+  const dv = new DataView(data.buffer);
+  dv.setUint32(0, 2, true); // SystemProgram: Transfer
+  dv.setBigUint64(4, BigInt(Math.round(amountSol * 1e9)), true);
+  const instruction = {
+    programId: publicKey('11111111111111111111111111111111'),
+    keys: [{ pubkey: u.identity.publicKey, isSigner: true, isWritable: true }, { pubkey: publicKey(to), isSigner: false, isWritable: true }],
+    data,
+  };
+  const r = await transactionBuilder().add({ instruction, signers: [u.identity], bytesCreatedOnChain: 0 }).sendAndConfirm(u);
+  return sig(r.signature);
 }
 
 export interface MintInput { name: string; uri: string; owner: string; attributes: { key: string; value: string }[]; royaltyBps: number }

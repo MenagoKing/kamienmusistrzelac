@@ -57,10 +57,10 @@ export function Wallets({ openId }: { openId?: string }) {
       {list.error ? <ErrorBox error={list.error} retry={list.reload} /> : !list.data ? <Loading /> : rows.length === 0 ? <Empty>No collectors yet.</Empty> : (
         <div className="tbl-wrap">
           <table className="tbl hover">
-            <thead><tr><th>Collector</th><th>Kind</th><th className="r">Holdings</th><th className="r">Packs opened</th><th className="r">Spent</th><th className="r">Last seen</th></tr></thead>
+            <thead><tr><th>Collector</th><th>Kind</th><th>Solana wallet</th><th className="r">Holdings</th><th className="r">Packs opened</th><th className="r">Spent</th><th className="r">Last seen</th></tr></thead>
             <tbody>{rows.map(w => (
               <tr key={w.address} onClick={() => go('#/wallets/' + w.address)}>
-                <td>{w.username ? <><b>{w.username}</b><br /><small className="mono dim">{w.email ?? short(w.address)}</small></> : <span className="mono">{w.address}</span>}</td><td><Badge v={w.kind} /></td><td className="r mono">{w.holdings}</td><td className="r mono">{w.pulls}</td><td className="r mono">{money(w.spent)}</td><td className="r dim">{when(w.last_seen)}</td>
+                <td>{w.username ? <><b>{w.username}</b><br /><small className="mono dim">{w.email ?? short(w.address)}</small></> : <span className="mono">{w.address}</span>}</td><td><Badge v={w.kind} /></td><td className="mono dim">{w.sol_wallet ? short(w.sol_wallet) : w.kind === 'sample' ? '—' : short(w.address)}</td><td className="r mono">{w.holdings}</td><td className="r mono">{w.pulls}</td><td className="r mono">{money(w.spent)}</td><td className="r dim">{when(w.last_seen)}</td>
               </tr>
             ))}</tbody>
           </table>
@@ -78,6 +78,7 @@ function WalletDrawer({ address, onClose }: { address: string; onClose: () => vo
       {d.error ? <ErrorBox error={d.error} /> : !d.data ? <Loading /> : (
         <>
           <div className="ed-status"><Badge v={d.data.wallet.kind} /><span className="mono dim">{address}</span>{d.data.wallet.email && <span className="dim">{d.data.wallet.email}</span>}{d.data.wallet.linked_wallet && <span className="mono dim">linked {short(d.data.wallet.linked_wallet)}</span>}</div>
+          {d.data.wallet.sol_wallet && <p className="dim small">Solana wallet <a className="mono" href={'https://explorer.solana.com/address/' + d.data.wallet.sol_wallet + '?cluster=devnet'} target="_blank" rel="noreferrer">{d.data.wallet.sol_wallet}</a> · created with the account, key kept encrypted on the server{d.data.wallet.key_exported_at ? ' · key exported ' + when(d.data.wallet.key_exported_at) : ''}</p>}
           <h3 className="ed-h">Holdings · {d.data.holdings.length}</h3>
           {d.data.holdings.length === 0 ? <p className="dim">None.</p> : (
             <table className="tbl compact hover"><tbody>{d.data.holdings.map(s => (

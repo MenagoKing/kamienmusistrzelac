@@ -62,6 +62,14 @@ Market specimens stay with independent certified dealers (`server/sources.ts`). 
 
 Escrow is kept by the app for now (payments are simulated); the on-chain escrow program is an open decision.
 
+## Account wallets (Solana)
+
+Every account gets its own Solana wallet when it is created (password, Google or demo sign-up; ). For new accounts the wallet address is the account address; accounts made before this got a wallet at start-up and their queued NFTs were re-addressed to it. NFTs are minted straight to the wallet (or to a linked Phantom/Solflare/Backpack wallet if the collector linked one), and Space Rocks pays the network fees.
+
+- The private key is stored encrypted (AES-256-GCM). The encryption key is  (32 bytes, hex or base64) or , generated on first start. **Back up the data directory** ( on the VPS): without that key the wallets cannot be used. A demo-data reset never deletes wallets.
+- Account › Wallet: address with copy and Solana Explorer link, live SOL balance, NFTs in the wallet, **Get test SOL** (devnet; the public RPC faucet is closed, so it sends 0.05 SOL from the vault authority once every 6 hours) and **Export private key** (password, or a sign-in within 15 minutes for Google accounts) to import the wallet into Phantom. Export is refused on mainnet unless .
+- Admin › Collectors shows each collector's wallet and whether its key was exported.
+
 ## NFTs on Solana (real, devnet by default)
 
 Every specimen a collector owns gets a real **Metaplex Core** NFT (`server/solana.ts`, queue in `server/nft.ts`): minted on a market purchase, pack pull or raffle with the specimen file as on-chain Attributes and a 3% Royalties plugin, transferred on a sale between collectors or a withdrawal to the linked wallet, burned on buyback or redemption. The vault authority is the asset's PermanentTransferDelegate and PermanentBurnDelegate, so it never needs the holder's signature. Metadata JSON and a generated card image are served at `/api/nft/<id>.json` and `.svg`. Purchases never wait for the chain: a worker processes the queue and retries; the reveal and the collection show the live status with an explorer link. Admin › Solana NFTs shows the authority, balance, queue and errors.

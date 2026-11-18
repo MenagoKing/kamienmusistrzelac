@@ -7,7 +7,8 @@ import path from 'node:path';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DATA_DIR, get, now, run } from './db.ts';
 import { getRules } from './store.ts';
-import { b58decode, b58encode, fail, randomHex } from './util.ts';
+import { b58decode, fail, randomHex } from './util.ts';
+import { createWallet } from './custody.ts';
 
 export const DAY = 86400000;
 const SECURE = process.env.NODE_ENV === 'production' && process.env.INSECURE_COOKIES !== '1';
@@ -29,7 +30,7 @@ function setCookie(res: ServerResponse, name: string, value: string, maxAgeMs: n
 
 export function newSession(res: ServerResponse, cookie: string, subject: string, role: 'wallet' | 'admin', ttl: number) {
   const token = randomHex(32);
-  run('INSERT INTO sessions (token, subject, role, expires_at) VALUES (?, ?, ?, ?)', token, subject, role, Date.now() + ttl);
+  run('INSERT INTO sessions (token, subject, role, expires_at, created_at) VALUES (?, ?, ?, ?, ?)', token, subject, role, Date.now() + ttl, Date.now());
   run('DELETE FROM sessions WHERE expires_at < ?', Date.now());
   setCookie(res, cookie, token, ttl);
 }
@@ -53,6 +54,13 @@ export const WALLET_COOKIE = 'sr_wallet';
 export const ADMIN_COOKIE = 'sr_admin';
 
 export const walletOf = (req: IncomingMessage) => session(req, WALLET_COOKIE, 'wallet');
+
+/** How long ago the collector signed in (for actions that need a fresh sign-in). */
+export function sessionAge(req: IncomingMessage) {
+  const t = cookies(req)[WALLET_COOKIE];
+  const s = t ? get<{ created_at: number }>('SELECT created_at FROM sessions WHERE token = ?', t) : undefined;
+  return s?.created_at ? Date.now() - s.created_at : Infinity;
+}
 
 export function requireWallet(req: IncomingMessage) {
   return walletOf(req) ?? fail(401, 'Connect a wallet first');
@@ -113,7 +121,7 @@ export function walletVerify(res: ServerResponse, body: any) {
 /** Demo wallet: a fresh address with no extension, for testing the flow. Disabled in settings for launch. */
 export function walletDemo(res: ServerResponse) {
   if (!getRules().demo_wallet) fail(403, 'The demo wallet is turned off');
-  const address = b58encode(crypto.randomBytes(32));
+  const address = createWallet(); // a real Solana wallet, like every account
   touchWallet(address, 'demo');
   newSession(res, WALLET_COOKIE, address, 'wallet', 7 * DAY);
   return { address, kind: 'demo' };

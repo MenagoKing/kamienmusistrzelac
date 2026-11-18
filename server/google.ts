@@ -6,7 +6,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { get, now, run, tx } from './db.ts';
 import { DAY, WALLET_COOKIE, newSession, touchWallet } from './auth.ts';
 import { getRules } from './store.ts';
-import { b58encode, fail } from './util.ts';
+import { fail } from './util.ts';
+import { createWallet } from './custody.ts';
 
 let keys: { list: any[]; until: number } | null = null;
 
@@ -57,7 +58,7 @@ export async function googleLogin(_req: IncomingMessage, res: ServerResponse, bo
     }
     let created = false;
     if (!u) {
-      const address = b58encode(crypto.randomBytes(32));
+      const address = createWallet(); // the account's own Solana wallet
       const username = freeCallsign(p.given_name || email.split('@')[0]);
       touchWallet(address, 'account');
       run('INSERT INTO users (address, username, email, google_sub, avatar_seed, created_at, last_login) VALUES (?, ?, ?, ?, ?, ?, ?)', address, username, email, p.sub, Math.floor(Math.random() * 100000), now(), now());

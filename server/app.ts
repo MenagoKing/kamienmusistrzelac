@@ -10,7 +10,7 @@ import * as A from './admin.ts';
 import { getRules, holdingsOf, pageData, redemptionOf, seriesProof, seriesRow, specimenRow, toPublic, toReveal, toSeries, vaultRegister } from './store.ts';
 import { all } from './db.ts';
 import { ensureSeeded, reseed } from './seed.ts';
-import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile } from './accounts.ts';
+import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile, walletExport, walletFaucet, walletInfo } from './accounts.ts';
 import { adminListings, buyListing, cancelListing, listForSale, listingsOf } from './market.ts';
 import { publicListings } from './store.ts';
 import * as SRC from './sources.ts';
@@ -106,6 +106,9 @@ on('PUT', '/api/me/profile', ({ req, body }) => updateProfile(requireWallet(req)
 on('PUT', '/api/me/password', ({ req, body }) => changePassword(requireWallet(req), body));
 on('POST', '/api/me/link-wallet', ({ req, body }) => linkWallet(requireWallet(req), body));
 on('POST', '/api/me/unlink-wallet', ({ req }) => unlinkWallet(requireWallet(req)));
+on('GET', '/api/me/wallet', ({ req }) => walletInfo(requireWallet(req)));
+on('POST', '/api/me/wallet/faucet', ({ req }) => walletFaucet(requireWallet(req)));
+on('POST', '/api/me/wallet/export', ({ req, body }) => walletExport(req, requireWallet(req), body));
 
 /* ---------- collectors' market ---------- */
 

@@ -1,7 +1,7 @@
 // /account: the collector's own space. Profile with level and rank, the collection (sell, cancel or
 // sell back, redeem, share), listings, achievements, activity, shipments and settings.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
-import type { Holding, PageData, RockType } from '../data';
+import type { Holding, PageData, RockType, WalletInfo } from '../data';
 import { api } from '../lib/api';
 import { AppProvider, callsign, useApp } from '../lib/store';
 import { useStill } from '../lib/stills';
@@ -19,8 +19,8 @@ import { RockView } from '../components/RockView';
 /** What a holding is worth to its holder: the escrowed rock price for reservations, else the rock value. */
 const valueOf = (h: Holding) => (h.reservation ? h.reservation.escrow_usd || h.reservation.reserved_price_usd : h.vault_value_usd);
 
-type Tab = 'collection' | 'selling' | 'achievements' | 'activity' | 'shipments' | 'settings';
-const TABS: [Tab, string][] = [['collection', 'Collection'], ['selling', 'For sale'], ['achievements', 'Achievements'], ['activity', 'Activity'], ['shipments', 'Shipments'], ['settings', 'Settings']];
+type Tab = 'collection' | 'selling' | 'wallet' | 'achievements' | 'activity' | 'shipments' | 'settings';
+const TABS: [Tab, string][] = [['collection', 'Collection'], ['selling', 'For sale'], ['wallet', 'Wallet'], ['achievements', 'Achievements'], ['activity', 'Activity'], ['shipments', 'Shipments'], ['settings', 'Settings']];
 
 const tabFromHash = (): Tab => {
   const h = (typeof location !== 'undefined' ? location.hash.slice(1) : '') as Tab;
@@ -39,7 +39,8 @@ function Banner() {
       <AvatarTurn seed={p.avatar_seed} size={220} />
       <div className="acc-id">
         <div className="sec mono"><span>Collector</span><span>{p.kind === 'account' ? 'Space Rocks account' : p.kind === 'demo' ? 'Demo wallet' : 'Solana wallet'}</span></div>
-        <h1>{p.username ?? shortAddr(p.address)}</h1>
+        <h1>{p.username ?? shortAddr(p.wallet ?? p.address)}</h1>
+        <WalletChip />
         {!p.username && <button type="button" className="lnk" onClick={() => { location.hash = 'settings'; }}>Pick a callsign →</button>}
         <div className="lvl">
           <span className="badge-lv mono">Level {p.level}</span>
@@ -228,6 +229,134 @@ function Shipments() {
   );
 }
 
+/* ---------- the account's Solana wallet ---------- */
+
+const copyText = async (t: string) => { try { await navigator.clipboard.writeText(t); return true; } catch { return false; } };
+const solFmt = (x: number) => x.toLocaleString('en-US', { maximumFractionDigits: x < 1 ? 4 : 3 }) + ' SOL';
+
+/** Short address chip with copy, for the profile banner. */
+function WalletChip() {
+  const { me, toast } = useApp();
+  if (!me) return null;
+  const addr = me.profile.wallet ?? me.address;
+  return (
+    <button type="button" className="wchip mono" title={addr} onClick={async () => toast((await copyText(addr)) ? 'Wallet address copied' : addr)}>
+      <i aria-hidden="true">◎</i>{shortAddr(addr)}<span>Copy</span>
+    </button>
+  );
+}
+
+function WalletPanel() {
+  const { me, toast, refresh } = useApp();
+  const [w, setW] = useState<WalletInfo | null>(null);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState('');
+  const [pw, setPw] = useState('');
+  const [secret, setSecret] = useState<{ b58: string; json: string } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [reveal, setReveal] = useState(false);
+  const load = async () => { try { setW(await api<WalletInfo>('GET', '/api/me/wallet')); setErr(''); } catch (e: any) { setErr(e.message); } };
+  useEffect(() => { load(); }, []);
+  if (!me) return null;
+  if (!w) return err ? <p className="err">{err}</p> : <p className="cempty-p"><Spinner label="Loading" /> Loading your wallet…</p>;
+
+  const faucet = async () => {
+    setBusy('faucet'); setErr('');
+    try {
+      const r = await api<{ source: string; amount_sol: number; balance_sol: number | null }>('POST', '/api/me/wallet/faucet', {});
+      toast(`${solFmt(r.amount_sol)} of test SOL ${r.source === 'faucet' ? 'from the devnet faucet' : 'from the Space Rocks vault'}`);
+      await load();
+    } catch (e: any) { setErr(e.message); } finally { setBusy(''); }
+  };
+  const exportKey = async (e: FormEvent) => {
+    e.preventDefault();
+    setBusy('export'); setErr('');
+    try {
+      const r = await api<{ secret_base58: string; secret_json: string }>('POST', '/api/me/wallet/export', { password: pw });
+      setSecret({ b58: r.secret_base58, json: r.secret_json }); setPw(''); setAsking(false); setReveal(false);
+    } catch (er: any) { setErr(er.message); } finally { setBusy(''); }
+  };
+  const net = w.cluster === 'mainnet-beta' ? 'Mainnet' : w.cluster === 'simulated' ? 'Simulated chain' : w.cluster[0].toUpperCase() + w.cluster.slice(1);
+
+  return (
+    <div className="wpanel">
+      <div className="wcard">
+        <div className="wcard-top">
+          <span className="mono">{w.custodial ? 'Your Space Rocks wallet' : 'The wallet you signed in with'}</span>
+          <span className={'wnet mono' + (w.cluster === 'mainnet-beta' ? ' main' : '')}>{net}</span>
+        </div>
+        <div className="wbal">
+          <b>{w.balance_sol == null ? '—' : solFmt(w.balance_sol)}</b>
+          <span className="mono">{w.balance_sol == null ? (w.error ? 'Balance unavailable right now' : 'Balance shows once the chain is live') : 'Balance'}</span>
+        </div>
+        <div className="waddr">
+          <code>{w.address}</code>
+          <div className="acts">
+            <button className="btn sm" type="button" onClick={async () => toast((await copyText(w.address)) ? 'Wallet address copied' : 'Copy it by hand')}>Copy address</button>
+            <a className="btn sm line" href={w.explorer} target="_blank" rel="noreferrer">Solana Explorer ↗</a>
+            <button className="btn sm line" type="button" onClick={() => { load(); refresh(); }}>Refresh</button>
+          </div>
+        </div>
+        <dl className="kv wkv">
+          <dt>NFTs in this wallet</dt><dd>{w.nfts_on_chain}</dd>
+          {w.nfts_pending > 0 && <><dt>Being minted</dt><dd>{w.nfts_pending}</dd></>}
+          {w.linked_wallet && <><dt>Withdrawals go to</dt><dd className="mono">{shortAddr(w.linked_wallet)}</dd></>}
+        </dl>
+        <p className="fine">{w.custodial
+          ? 'Created with your account. Every specimen you get is minted here as an NFT, and the network fees are paid by Space Rocks.'
+          : 'Your specimens are minted straight to this wallet.'}</p>
+      </div>
+
+      {w.custodial && (
+        <div className="wside">
+          {w.faucet && (
+            <div className="setc">
+              <h3 className="acc-h">Test SOL</h3>
+              <p className="dlg-p">This is {net.toLowerCase()}: SOL here has no value. Get some to try the wallet in Phantom or Solflare.</p>
+              <button className="btn line" type="button" disabled={busy === 'faucet' || !!w.faucet.next_at} onClick={faucet}>{busy === 'faucet' ? <><Spinner label="Sending" />Sending…</> : w.faucet.next_at ? `Again at ${new Date(w.faucet.next_at).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'Get test SOL'}</button>
+              <p className="fine">Or paste your address at <a href="https://faucet.solana.com" target="_blank" rel="noreferrer">faucet.solana.com</a>.</p>
+            </div>
+          )}
+          {w.export && (
+            <div className="setc">
+              <h3 className="acc-h">Private key</h3>
+              {secret ? (
+                <>
+                  <p className="err">Anyone with this key controls the wallet and its NFTs. Never share it, never paste it into a website.</p>
+                  <code className={'wkey' + (reveal ? '' : ' blur')} onClick={() => setReveal(true)}>{secret.b58}</code>
+                  <div className="acts">
+                    {!reveal && <button className="btn sm line" type="button" onClick={() => setReveal(true)}>Show</button>}
+                    <button className="btn sm" type="button" onClick={async () => toast((await copyText(secret.b58)) ? 'Private key copied' : 'Copy it by hand')}>Copy key</button>
+                    <button className="btn sm line" type="button" onClick={async () => toast((await copyText(secret.json)) ? 'Key copied as a JSON array' : 'Copy it by hand')}>Copy as JSON</button>
+                    <button className="btn sm line" type="button" onClick={() => setSecret(null)}>Hide</button>
+                  </div>
+                  <p className="fine">In Phantom: Add account › Import private key, then switch Phantom to {net.toLowerCase()} to see your specimens.</p>
+                </>
+              ) : asking ? (
+                <form className="fm" onSubmit={exportKey}>
+                  {w.export.needs_password
+                    ? <label>Your password<input type="password" autoComplete="current-password" value={pw} onChange={e => setPw(e.target.value)} required data-autofocus /></label>
+                    : <p className="dlg-p">{w.export.needs_fresh_sign_in ? 'You need to have signed in within the last 15 minutes.' : 'This is a demo wallet.'}</p>}
+                  <div className="acts">
+                    <button className="btn" type="submit" disabled={busy === 'export'}>{busy === 'export' ? <><Spinner label="Checking" />Checking…</> : 'Show my private key'}</button>
+                    <button className="btn line" type="button" onClick={() => { setAsking(false); setPw(''); }}>Cancel</button>
+                  </div>
+                </form>
+              ) : (
+                <>
+                  <p className="dlg-p">Export the key to use this wallet in Phantom or Solflare.{w.export.needs_password ? ' You will be asked for your password.' : w.export.needs_fresh_sign_in ? ' You need to have signed in within the last 15 minutes.' : ''}</p>
+                  <button className="btn line" type="button" onClick={() => setAsking(true)}>Export private key</button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+      {err && <p className="err" role="alert">{err}</p>}
+    </div>
+  );
+}
+
 /* ---------- settings ---------- */
 
 function Settings() {
@@ -293,20 +422,20 @@ function Settings() {
       </form>
 
       <div className="fm setc">
-        <h3 className="acc-h">Solana wallet</h3>
-        {p.kind !== 'account' ? <p className="dlg-p">You signed in with the wallet <code>{shortAddr(p.address)}</code>: your specimens are minted straight to it.</p> : p.linked_wallet ? (
+        <h3 className="acc-h">Withdrawal wallet</h3>
+        {!p.wallet ? <p className="dlg-p">You signed in with the wallet <code>{shortAddr(p.address)}</code>: your specimens are minted straight to it.</p> : p.linked_wallet ? (
           <>
             <p className="dlg-p">Withdrawals go to <code>{shortAddr(p.linked_wallet)}</code>.</p>
             <button className="btn line" type="button" onClick={() => run('wallet', () => api('POST', '/api/me/unlink-wallet', {}), 'Wallet unlinked')}>Unlink wallet</button>
           </>
         ) : (
           <>
-            <p className="dlg-p">Your NFTs are held in your Space Rocks account. Link a wallet to withdraw them to it later.</p>
+            <p className="dlg-p">Your NFTs are in your Space Rocks wallet (see the Wallet tab). Link Phantom, Solflare or Backpack to send them there instead.</p>
             <div className="wl tight">{WALLETS.map(w => w.detect() ? <button key={w.id} className="wrow" type="button" onClick={() => link(w.id)} disabled={busy === 'wallet'}><b>{w.name}</b><span className="mono">Link</span></button> : <a key={w.id} className="wrow off" href={w.url} target="_blank" rel="noreferrer"><b>{w.name}</b><span className="mono">Install ↗</span></a>)}</div>
           </>
         )}
         {err.wallet && <p className="err">{err.wallet}</p>}
-        <p className="fine mono">Vault address {shortAddr(p.address)} · since {new Date(p.created_at).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</p>
+        <p className="fine mono">Wallet {shortAddr(p.wallet ?? p.address)} · since {new Date(p.created_at).toLocaleDateString('en-GB', { month: 'short', year: 'numeric' })}</p>
       </div>
 
       <div className="setc out">
@@ -359,6 +488,7 @@ function Page() {
             <section className="acc-body wrap">
               {tab === 'collection' && <Collection />}
               {tab === 'selling' && <Selling />}
+              {tab === 'wallet' && <WalletPanel />}
               {tab === 'achievements' && <Achievements />}
               {tab === 'activity' && <ActivityList />}
               {tab === 'shipments' && <Shipments />}

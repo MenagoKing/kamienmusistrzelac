@@ -412,33 +412,40 @@ export function PackOpening({ series, currency, seed }: { series: Series; curren
       {phase !== 'reveal' && !err && <p className="opn2-status mono" aria-live="polite">{phase === 'charge' ? `Opening one of ${left} sealed packs…` : 'Here it is'}</p>}
 
       {sp && phase !== 'charge' && (
-        <div className="opn2-rock">
-          <i className="halo" aria-hidden="true" />
-          <RockView hint={sp.render} mode="live" auto={0.4} scale={1.42} label={`${sp.name} in 3D. Drag to turn it.`} />
-          <span className="opn2-drag mono" aria-hidden="true">Drag to turn it</span>
+        <div className="opn2-stage">
+          <div className="opn2-rock">
+            <i className="halo" aria-hidden="true" />
+            <i className="pedestal" aria-hidden="true" />
+            <RockView hint={sp.render} mode="live" auto={0.4} scale={1.42} label={`${sp.name} in 3D. Drag to turn it.`} />
+            <span className="opn2-drag mono" aria-hidden="true">Drag to turn it</span>
+          </div>
+          {res && phase === 'reveal' && (
+            <div className="opn2-side">
+              <div className="opn2-panel">
+                <div className="opn2-top">
+                  <span className={'chip' + (band !== 'hit' ? ' ' + band : '')}>{BAND_NAME[band].toUpperCase()} · {multiple(res.reveal.vault_value_usd, res.reveal.pack_price_usd)}×</span>
+                  <span className="mono dim">{sp.id}</span>
+                </div>
+                <h3>{sp.name}</h3>
+                <div className="cl mono">{sp.class} · {mass(sp.mass_g)}</div>
+                <p className="brag">You pulled {PIECE[sp.render.type]}.</p>
+                <dl className="kv">
+                  <dt>Pack price</dt><dd>{usd(res.reveal.pack_price_usd)}</dd>
+                  <dt>Rock value</dt><dd>{usd(res.reveal.vault_value_usd)}</dd>
+                  <dt>Instant offer, {pct(data.rules.buyback_share)}%</dt><dd className="hot">{usd(buyback(res.reveal.vault_value_usd, data.rules))}</dd>
+                </dl>
+                <NftLine specimenId={sp.id} />
+                <RevealActions reveal={res.reveal} onDone={close} extra={<button className="btn line" type="button" onClick={() => open({ kind: 'pack', series })}>Open another</button>} />
+                <TxLine tx={res.payment.tx} simulated={res.payment.simulated} label={`Paid ${res.payment.currency === 'SOL' ? res.payment.amount + ' SOL' : usd(res.payment.amount)}`} />
+                <button className="x opn-x" type="button" onClick={close} aria-label="Close"><i aria-hidden="true" /></button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {err && (
         <div className="opn2-panel solo"><h3>The pack did not open.</h3><p className="dlg-p">{err}</p><div className="acts"><button className="btn" type="button" onClick={close}>Back</button></div></div>
-      )}
-
-      {res && sp && phase === 'reveal' && (
-        <div className="opn2-panel">
-          <span className={'chip' + (band !== 'hit' ? ' ' + band : '')}>{band.toUpperCase()} · {multiple(res.reveal.vault_value_usd, res.reveal.pack_price_usd)}×</span>
-          <h3>{sp.name}</h3>
-          <div className="cl mono">{sp.class} · {mass(sp.mass_g)} · {sp.id}</div>
-          <p className="brag">You pulled {PIECE[sp.render.type]}.</p>
-          <dl className="kv">
-            <dt>Pack price</dt><dd>{usd(res.reveal.pack_price_usd)}</dd>
-            <dt>Rock value</dt><dd>{usd(res.reveal.vault_value_usd)}</dd>
-            <dt>Instant offer, {pct(data.rules.buyback_share)}%</dt><dd className="hot">{usd(buyback(res.reveal.vault_value_usd, data.rules))}</dd>
-          </dl>
-          <NftLine specimenId={sp.id} />
-          <RevealActions reveal={res.reveal} onDone={close} extra={<button className="btn line" type="button" onClick={() => open({ kind: 'pack', series })}>Open another</button>} />
-          <TxLine tx={res.payment.tx} simulated={res.payment.simulated} label={`Paid ${res.payment.currency === 'SOL' ? res.payment.amount + ' SOL' : usd(res.payment.amount)}`} />
-          <button className="x opn-x" type="button" onClick={close} aria-label="Close"><i aria-hidden="true" /></button>
-        </div>
       )}
     </div>
   );

@@ -15,6 +15,7 @@ import { adminListings, buyListing, cancelListing, listForSale, listingsOf } fro
 import { publicListings } from './store.ts';
 import * as SRC from './sources.ts';
 import { generateSamples, removeSamples } from './samples.ts';
+import { finishRun, gameStatus, startRun } from './game.ts';
 import { startSolPrice, startTokenSampler, tokenStatus } from './token.ts';
 import { chainAirdrop, chainStatus, drain, migrateSimulatedMints, nftOwnerOf, queueTransfer, retryFailed, startOwnerWatch, startWorker } from './nft.ts';
 import { googleLogin } from './google.ts';
@@ -79,6 +80,9 @@ on('POST', '/api/market/:id/buy', ({ req, params, body }) => {
   return withPayment(() => (s.dealer_id ? SRC.reserve(wallet, s.id, body) : buyMarket(wallet, s.id, body?.currency, body?.expected_price_usd)));
 });
 on('GET', '/api/token', () => tokenStatus());
+on('GET', '/api/game', ({ req }) => gameStatus(walletOf(req)));
+on('POST', '/api/game/start', ({ req }) => startRun(requireWallet(req)));
+on('POST', '/api/game/finish', ({ req, body }) => finishRun(requireWallet(req), body));
 
 /* ---------- reservations (Addendum 1) ---------- */
 

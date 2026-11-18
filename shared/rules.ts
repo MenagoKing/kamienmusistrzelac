@@ -31,6 +31,13 @@ export const DEFAULT_RULES: Rules = {
   token_burn_share: 0.5,
   token_price_source: 'manual',
   token_manual_price_usd: 0,
+  game_enabled: true,
+  game_token_required: true,
+  game_min_token_usd: 100,
+  game_min_score: 25000,
+  game_win_chance: 0.02,
+  game_daily_runs: 3,
+  game_prize_max_usd: 25,
 };
 
 /** Rarity shown on listings: class first, then price. */

@@ -132,6 +132,20 @@ export function Settings() {
         </Card>
       </div>
 
+      <Card title="Impact Hunter (mini-game)">
+        <div className="tgls">
+          <Toggle checked={r.game_enabled} onChange={v => set({ game_enabled: v })} label="Game open" hint="Shown as Play in the site menu." />
+          <Toggle checked={r.game_token_required} onChange={v => set({ game_token_required: v })} label={`Players must hold $${r.game_min_token_usd} in $${r.token_symbol}`} hint="Turn off only to test the game before the token is live." />
+        </div>
+        <div className="form-grid">
+          <Field label="Token needed to play, USD"><input type="number" min={0} value={r.game_min_token_usd} onChange={e => set({ game_min_token_usd: Number(e.target.value) })} /></Field>
+          <Field label="Score to qualify" hint="A strong player reaches 25 000 in about 3 minutes of near-perfect play"><input type="number" min={100} value={r.game_min_score} onChange={e => set({ game_min_score: Number(e.target.value) })} /></Field>
+          <Field label="Win chance per qualifying run, %"><input type="number" step="0.1" min={0} max={50} value={P(r.game_win_chance)} onChange={e => set({ game_win_chance: F(e.target.value) })} /></Field>
+          <Field label="Runs per player per day"><input type="number" min={0} value={r.game_daily_runs} onChange={e => set({ game_daily_runs: Number(e.target.value) })} /></Field>
+          <Field label="Prizes: vault specimens worth up to, USD" hint="Unsealed vault stock at or below this value"><input type="number" min={0} value={r.game_prize_max_usd} onChange={e => set({ game_prize_max_usd: Number(e.target.value) })} /></Field>
+        </div>
+      </Card>
+
       <Card title="Danger zone" className="danger-card">
         <div className="dz">
           <div><b>Reset demo data</b><p className="dim">Wipes every specimen, series, drop, order and wallet and loads the sample data again. Admin sessions stay.</p></div>

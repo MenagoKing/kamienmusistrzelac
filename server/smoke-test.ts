@@ -398,6 +398,38 @@ try {
     console.log('NFT holder owns the specimen ok');
   }
 
+  // ---- Impact Hunter: token gate, verified runs, prize roll ----
+  {
+    const g0 = await ok('GET', '/api/game', undefined, 'p2');
+    assert.equal(g0.can_play, false, 'the token is not live, so nobody can play');
+    assert.match(g0.reason, /ROCKS/);
+    assert.equal((await call('POST', '/api/game/start', {}, 'p2')).status, 403);
+    const rs = await ok('GET', '/api/admin/settings', undefined, 'admin');
+    await ok('PUT', '/api/admin/settings', { ...rs, game_token_required: false, game_min_score: 100, game_win_chance: 0.5, game_daily_runs: 3, game_prize_max_usd: 1000 }, 'admin');
+    const g1 = await ok('GET', '/api/game', undefined, 'p2');
+    assert.ok(g1.can_play && g1.runs_left === 3 && g1.prizes_left > 0);
+    // an impossible score is not counted
+    const r1 = await ok('POST', '/api/game/start', {}, 'p2');
+    const bad = await ok('POST', '/api/game/finish', { run_id: r1.run_id, score: 999999, waves: 40, duration_ms: 600000 }, 'p2');
+    assert.equal(bad.valid, false);
+    assert.equal(bad.won, null);
+    assert.equal((await call('POST', '/api/game/finish', { run_id: r1.run_id, score: 10, waves: 1, duration_ms: 1 }, 'p2')).status, 409, 'a run ends once');
+    // a qualifying, plausible run with a winning roll gets a real specimen and its NFT
+    const r2 = await ok('POST', '/api/game/start', {}, 'p2');
+    const rnd = Math.random; Math.random = () => 0;
+    const win = await ok('POST', '/api/game/finish', { run_id: r2.run_id, score: 300, waves: 1, duration_ms: 50 }, 'p2');
+    Math.random = rnd;
+    assert.ok(win.valid && win.qualified && win.won, JSON.stringify(win));
+    await settle();
+    const p2h = (await ok('GET', '/api/me', undefined, 'p2')).holdings.find((h: any) => h.id === win.won.id);
+    assert.equal(p2h.acquired_via, 'game');
+    assert.equal(p2h.mint_status, 'minted');
+    await ok('POST', '/api/game/start', {}, 'p2');
+    assert.equal((await call('POST', '/api/game/start', {}, 'p2')).status, 403, 'three runs a day');
+    await ok('PUT', '/api/admin/settings', { ...rs }, 'admin');
+    console.log('game ok');
+  }
+
   // ---- devnet / mainnet: separate data, admin switch ----
   {
     assert.equal((await call('POST', '/api/admin/network/switch', { network: 'mainnet-beta', password: 'nope', confirm: 'MAINNET' }, 'admin')).status, 401);

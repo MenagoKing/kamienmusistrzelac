@@ -12,6 +12,7 @@ export const NAV = [
   ['#vault', 'Register'],
   ['#rocks', '$ROCKS'],
   ['#faq', 'FAQ'],
+  ['#play', 'Play'],
 ] as const;
 
 export function NavList({ base = '' }: { base?: string }) {

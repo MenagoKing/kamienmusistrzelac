@@ -100,6 +100,12 @@ CREATE TABLE IF NOT EXISTS payouts (
   signature TEXT, error TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS payouts_status ON payouts(status);
+CREATE TABLE IF NOT EXISTS game_runs (
+  id TEXT PRIMARY KEY, wallet TEXT NOT NULL, day TEXT NOT NULL, seed TEXT NOT NULL, started_ms INTEGER NOT NULL, finished_at TEXT,
+  score INTEGER NOT NULL DEFAULT 0, waves INTEGER NOT NULL DEFAULT 0, duration_ms INTEGER NOT NULL DEFAULT 0, valid INTEGER NOT NULL DEFAULT 0,
+  flags TEXT NOT NULL DEFAULT '', qualified INTEGER NOT NULL DEFAULT 0, won_specimen TEXT, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS game_runs_wallet_day ON game_runs(wallet, day);
 CREATE TABLE IF NOT EXISTS custody (owner TEXT PRIMARY KEY, pubkey TEXT NOT NULL UNIQUE, secret_enc TEXT NOT NULL, created_at TEXT NOT NULL, faucet_at TEXT, exported_at TEXT);
 CREATE TABLE IF NOT EXISTS dealers (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, country TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'OTHER',

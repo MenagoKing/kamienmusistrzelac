@@ -283,7 +283,7 @@ export function ShareDialog({ reveal }: { reveal: PackReveal }) {
 
 /* ---------- a specimen in your collection ---------- */
 
-const VIA: Record<Holding['acquired_via'], string> = { market: 'Reserved on the market', pack: 'Pulled from a pack', raffle: 'Won in a launch drop raffle', secondary: 'Bought from a collector' };
+const VIA: Record<Holding['acquired_via'], string> = { market: 'Reserved on the market', pack: 'Pulled from a pack', raffle: 'Won in a launch drop raffle', secondary: 'Bought from a collector', game: 'Won in Impact Hunter' };
 
 function SasThumb({ s }: { s: Specimen }) {
   const img = useStill(s.render, { w: 112, h: 112, rot: -2, scale: 1.45 }, s.photo);

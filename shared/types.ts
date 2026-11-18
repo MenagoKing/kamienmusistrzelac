@@ -219,6 +219,14 @@ export interface Rules {
   token_burn_share: number; // share of the commission on token payments set aside to burn
   token_price_source: 'manual' | 'jupiter';
   token_manual_price_usd: number;
+  /** Impact Hunter, the mini-game */
+  game_enabled: boolean;
+  game_token_required: boolean; // players must hold game_min_token_usd in the token
+  game_min_token_usd: number;
+  game_min_score: number; // a run must reach this to qualify for the prize roll
+  game_win_chance: number; // chance a qualifying run wins a specimen
+  game_daily_runs: number;
+  game_prize_max_usd: number; // prizes: vault specimens worth at most this
 }
 
 export interface Series {
@@ -325,7 +333,7 @@ export interface PageData {
 }
 
 export interface Holding extends Specimen {
-  acquired_via: 'market' | 'pack' | 'raffle' | 'secondary';
+  acquired_via: 'market' | 'pack' | 'raffle' | 'secondary' | 'game';
   acquired_at: string;
   paid_usd: number | null;
   band: Band | null;

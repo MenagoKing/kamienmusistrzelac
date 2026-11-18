@@ -14,6 +14,7 @@ export type Dialog =
   | { kind: 'redeem'; specimen: Holding | PackReveal['specimen']; reservation?: Reservation | null }
   | { kind: 'share'; reveal: PackReveal }
   | { kind: 'register' }
+  | { kind: 'game' }
   | { kind: 'proof'; seriesId: string; name: string };
 
 interface Toast { id: number; text: string; tone: 'ok' | 'err' }

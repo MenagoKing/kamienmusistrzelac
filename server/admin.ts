@@ -648,6 +648,13 @@ export function updateRules(actor: string, b: any): Rules {
     token_burn_share: share(b?.token_burn_share, 'Burn share', cur.token_burn_share),
     token_price_source: b?.token_price_source === 'jupiter' ? 'jupiter' : b?.token_price_source === 'manual' ? 'manual' : cur.token_price_source,
     token_manual_price_usd: b?.token_manual_price_usd == null || b?.token_manual_price_usd === '' ? cur.token_manual_price_usd : num(b.token_manual_price_usd, 'Token price', 0, 1e9),
+    game_enabled: typeof b?.game_enabled === 'boolean' ? b.game_enabled : cur.game_enabled,
+    game_token_required: typeof b?.game_token_required === 'boolean' ? b.game_token_required : cur.game_token_required,
+    game_min_token_usd: b?.game_min_token_usd == null ? cur.game_min_token_usd : num(b.game_min_token_usd, 'Token needed to play', 0, 1e7),
+    game_min_score: b?.game_min_score == null ? cur.game_min_score : Math.round(num(b.game_min_score, 'Score to qualify', 100, 1e8)),
+    game_win_chance: b?.game_win_chance == null ? cur.game_win_chance : num(b.game_win_chance, 'Win chance', 0, 0.5),
+    game_daily_runs: b?.game_daily_runs == null ? cur.game_daily_runs : Math.round(num(b.game_daily_runs, 'Runs per day', 0, 100)),
+    game_prize_max_usd: b?.game_prize_max_usd == null ? cur.game_prize_max_usd : num(b.game_prize_max_usd, 'Prize value', 0, 1e5),
   };
   if (r.token_mint && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.token_mint)) fail(400, 'The token mint must be a Solana address');
   if (r.token_enabled && r.token_price_source === 'jupiter' && !r.token_mint) fail(400, 'Set the token mint to read its price from Jupiter');

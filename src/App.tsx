@@ -39,6 +39,7 @@ function Page() {
       <Faq />
       <Join />
       <Footer />
+      <PlayHash />
       <DialogHost d={dialog} />
       <Toasts />
       <NetBadge />
@@ -52,4 +53,15 @@ export function App({ data }: { data: PageData }) {
       <Page />
     </AppProvider>
   );
+}
+
+/** #play opens Impact Hunter. */
+function PlayHash() {
+  const { open } = useApp();
+  useEffect(() => {
+    const f = () => { if (location.hash === '#play') { open({ kind: 'game' }); history.replaceState(null, '', location.pathname); } };
+    f(); addEventListener('hashchange', f);
+    return () => removeEventListener('hashchange', f);
+  }, [open]);
+  return null;
 }

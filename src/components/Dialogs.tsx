@@ -3,6 +3,7 @@ import { AuthDialog } from './WalletDialog';
 import { BuyDialog, BuyListingDialog, PackDialog, PackOpening, RevealDialog } from './Checkout';
 import { ItemDialog, ListDialog, RedeemDialog, ShareDialog } from './Account';
 import { ProofDialog, RegisterDialog } from './Explore';
+import { GameDialog } from './Game';
 
 /** Renders whichever dialog is open (site and account page share them). */
 export function DialogHost({ d }: { d: Dialog | null }) {
@@ -19,6 +20,7 @@ export function DialogHost({ d }: { d: Dialog | null }) {
     case 'redeem': return <RedeemDialog specimen={d.specimen} reservation={d.reservation ?? ('reservation' in d.specimen ? d.specimen.reservation : null)} />;
     case 'share': return <ShareDialog reveal={d.reveal} />;
     case 'register': return <RegisterDialog />;
+    case 'game': return <GameDialog />;
     case 'proof': return <ProofDialog seriesId={d.seriesId} name={d.name} />;
   }
 }

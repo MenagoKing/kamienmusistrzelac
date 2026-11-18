@@ -221,7 +221,7 @@ export function profileOf(address: string): Profile {
   };
 }
 
-const ACT_KINDS = ['wallet_withdrawal', 'nft_gift_out', 'nft_gift_in', 'nft_sent', 'nft_received', 'nft_left', 'market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund', 'reservation', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund', 'price_difference_topup'];
+const ACT_KINDS = ['game_prize', 'wallet_withdrawal', 'nft_gift_out', 'nft_gift_in', 'nft_sent', 'nft_received', 'nft_left', 'market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund', 'reservation', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund', 'price_difference_topup'];
 
 export function activityOf(address: string): Activity[] {
   return all<any>(`SELECT l.id, l.kind, l.usd, l.specimen_id, s.name specimen_name, l.created_at FROM ledger l LEFT JOIN specimens s ON s.id = l.specimen_id

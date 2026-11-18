@@ -64,10 +64,10 @@ Escrow is kept by the app for now (payments are simulated); the on-chain escrow 
 
 ## Account wallets (Solana)
 
-Every account gets its own Solana wallet when it is created (password, Google or demo sign-up; ). For new accounts the wallet address is the account address; accounts made before this got a wallet at start-up and their queued NFTs were re-addressed to it. NFTs are minted straight to the wallet (or to a linked Phantom/Solflare/Backpack wallet if the collector linked one), and Space Rocks pays the network fees.
+Every account gets its own Solana wallet when it is created (password, Google or demo sign-up; `server/custody.ts`). For new accounts the wallet address is the account address; accounts made before this got a wallet at start-up and their queued NFTs were re-addressed to it. NFTs are minted straight to the wallet (or to a linked Phantom/Solflare/Backpack wallet if the collector linked one), and Space Rocks pays the network fees.
 
-- The private key is stored encrypted (AES-256-GCM). The encryption key is  (32 bytes, hex or base64) or , generated on first start. **Back up the data directory** ( on the VPS): without that key the wallets cannot be used. A demo-data reset never deletes wallets.
-- Account › Wallet: address with copy and Solana Explorer link, live SOL balance, NFTs in the wallet, **Get test SOL** (devnet; the public RPC faucet is closed, so it sends 0.05 SOL from the vault authority once every 6 hours) and **Export private key** (password, or a sign-in within 15 minutes for Google accounts) to import the wallet into Phantom. Export is refused on mainnet unless .
+- The private key is stored encrypted (AES-256-GCM). The encryption key is `CUSTODY_KEY` (32 bytes, hex or base64) or `data/custody-key.bin`, generated on first start. **Back up the data directory** (`/var/lib/space-rocks` on the VPS): without that key the wallets cannot be used. A demo-data reset never deletes wallets.
+- Account › Wallet: address with copy and Solana Explorer link, live SOL balance, NFTs in the wallet, **Get test SOL** (devnet; the public RPC faucet is closed, so it sends 0.05 SOL from the vault authority once every 6 hours) and **Export private key** (password, or a sign-in within 15 minutes for Google accounts) to import the wallet into Phantom. Export is refused on mainnet unless `ALLOW_KEY_EXPORT=1`.
 - Admin › Collectors shows each collector's wallet and whether its key was exported.
 
 ## NFTs on Solana (real, devnet by default)

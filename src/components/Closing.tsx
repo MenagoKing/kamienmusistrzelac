@@ -87,7 +87,7 @@ export function Footer() {
         <div><h5>Product</h5><ul><li><a href="#market">Market</a></li><li><a href="#packs">Packs</a></li><li><a href="#drops">Launch drops</a></li><li><a href="#vault">The register</a></li><li><a href="#rocks">$ROCKS</a></li></ul></div>
         <div><h5>Help</h5><ul><li><a href="#faq">FAQ</a></li><li><a href="#packs">Pack bands and series</a></li><li><a href="#after">Shipping and redemption</a></li></ul></div>
         {/* TODO: Terms and Privacy pages. They point to the top for now. */}
-        <div><h5>Legal</h5><ul><li><a href="#top">Terms</a></li><li><a href="#top">Privacy</a></li></ul></div>
+        <div><h5>Legal</h5><ul><li><a href="#top">Terms</a></li><li><a href="/privacy.html">Privacy</a></li></ul></div>
       </div>
       {/* "Sample data on this page" is switched off in Admin > Settings at launch (HANDOFF). */}
       <div className="base mono"><span>© 2026 Space Rocks</span>{data.rules.sample_notice && <span>Sample data on this page</span>}</div>

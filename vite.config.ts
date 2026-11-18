@@ -33,7 +33,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react(), api()],
     build: {
       assetsInlineLimit: 0,
-      rollupOptions: { input: { main: 'index.html', admin: 'admin.html' } },
+      rollupOptions: { input: { main: 'index.html', admin: 'admin.html', privacy: 'privacy.html' } },
     },
     ssr: { external: ['node:sqlite'] },
   };

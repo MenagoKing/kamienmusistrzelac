@@ -13,10 +13,10 @@ export function DialogHost({ d }: { d: Dialog | null }) {
     case 'buy-listing': return <BuyListingDialog listing={d.listing} />;
     case 'pack': return <PackDialog series={d.series} />;
     case 'opening': return <PackOpening key={d.seed} series={d.series} currency={d.currency} seed={d.seed} />;
-    case 'reveal': return <RevealDialog key={d.reveal.specimen.id} reveal={d.reveal} payment={d.payment} mint={d.mint} via={d.via} />;
+    case 'reveal': return <RevealDialog key={d.reveal.specimen.id} reveal={d.reveal} payment={d.payment} mint={d.mint} via={d.via} reservation={d.reservation} confirm={d.confirm} />;
     case 'item': return <ItemDialog holding={d.holding} />;
     case 'list': return <ListDialog holding={d.holding} />;
-    case 'redeem': return <RedeemDialog specimen={d.specimen} />;
+    case 'redeem': return <RedeemDialog specimen={d.specimen} reservation={d.reservation ?? ('reservation' in d.specimen ? d.specimen.reservation : null)} />;
     case 'share': return <ShareDialog reveal={d.reveal} />;
     case 'register': return <RegisterDialog />;
     case 'proof': return <ProofDialog seriesId={d.seriesId} name={d.name} />;

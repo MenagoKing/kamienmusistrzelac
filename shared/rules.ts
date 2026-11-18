@@ -22,7 +22,28 @@ export const DEFAULT_RULES: Rules = {
   sample_notice: true,
   market_funds_buyback: false,
   google_client_id: '',
+  source_max_age_hours: 0,
+  token_enabled: false,
+  token_symbol: 'ROCKS',
+  token_mint: '',
+  token_decimals: 6,
+  token_discount: 0.05,
+  token_burn_share: 0.5,
+  token_price_source: 'manual',
+  token_manual_price_usd: 0,
 };
+
+/** Rarity shown on listings: class first, then price. */
+export type Rarity = 'Common' | 'Uncommon' | 'Rare' | 'Epic' | 'Legendary';
+export function rarityOf(type: RockType, priceUsd: number | null | undefined): Rarity {
+  if (type === 'martian' || type === 'lunar') return 'Legendary';
+  if (type === 'pallasite') return priceUsd != null && priceUsd >= 400 ? 'Legendary' : 'Epic';
+  const p = priceUsd ?? 0;
+  return p >= 500 ? 'Epic' : p >= 200 ? 'Rare' : p >= 80 ? 'Uncommon' : 'Common';
+}
+
+/** Price when paying with the token (rules.token_discount off). */
+export const tokenPrice = (usd: number, rules: Pick<Rules, 'token_discount'>) => Math.round(usd * (1 - rules.token_discount) * 100) / 100;
 
 export const BANDS: Band[] = ['floor', 'par', 'hit'];
 export const BAND_NAME: Record<Band, string> = { floor: 'Floor', par: 'Par', hit: 'Hit' };

@@ -153,7 +153,7 @@ export function profileOf(address: string): Profile {
   const hits = n("SELECT COUNT(*) n FROM pulls WHERE wallet = ? AND bonus = 0 AND band = 'hit'", address);
   const dropPacks = n('SELECT COUNT(*) n FROM pulls WHERE wallet = ? AND bonus = 0 AND drop_id IS NOT NULL', address);
   const raffles = n('SELECT COUNT(*) n FROM pulls WHERE wallet = ? AND bonus = 1', address);
-  const marketBuys = n("SELECT COUNT(*) n FROM ledger WHERE wallet = ? AND kind = 'market_buy'", address);
+  const marketBuys = n("SELECT COUNT(*) n FROM ledger WHERE wallet = ? AND kind IN ('market_buy', 'reservation')", address);
   const secondaryBuys = n("SELECT COUNT(*) n FROM ledger WHERE wallet = ? AND kind = 'secondary_sale'", address);
   const sold = n("SELECT COUNT(*) n FROM ledger WHERE wallet = ? AND kind = 'seller_payout'", address);
   const buybacks = n("SELECT COUNT(*) n FROM ledger WHERE wallet = ? AND kind = 'buyback'", address);
@@ -161,7 +161,7 @@ export function profileOf(address: string): Profile {
   const earned = -s("SELECT SUM(usd) s FROM ledger WHERE wallet = ? AND kind IN ('seller_payout', 'buyback')", address);
 
   const held = all<{ category: RockType; vault_value_usd: number | null }>("SELECT category, vault_value_usd FROM specimens WHERE owner = ? AND state IN ('held', 'redeeming')", address);
-  const everIds = new Set(all<{ specimen_id: string }>("SELECT DISTINCT specimen_id FROM ledger WHERE wallet = ? AND kind IN ('market_buy', 'pack', 'raffle', 'secondary_sale') AND specimen_id IS NOT NULL", address).map(r => r.specimen_id));
+  const everIds = new Set(all<{ specimen_id: string }>("SELECT DISTINCT specimen_id FROM ledger WHERE wallet = ? AND kind IN ('market_buy', 'reservation', 'pack', 'raffle', 'secondary_sale') AND specimen_id IS NOT NULL", address).map(r => r.specimen_id));
   const ever = new Set<RockType>();
   let rareEver = 0;
   for (const id of everIds) {
@@ -211,7 +211,7 @@ export function profileOf(address: string): Profile {
   };
 }
 
-const ACT_KINDS = ['market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund'];
+const ACT_KINDS = ['market_buy', 'pack', 'raffle', 'secondary_sale', 'seller_payout', 'buyback', 'redemption_fee', 'redemption_refund', 'reservation', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund', 'price_difference_topup'];
 
 export function activityOf(address: string): Activity[] {
   return all<any>(`SELECT l.id, l.kind, l.usd, l.specimen_id, s.name specimen_name, l.created_at FROM ledger l LEFT JOIN specimens s ON s.id = l.specimen_id

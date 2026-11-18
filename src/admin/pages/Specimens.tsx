@@ -4,6 +4,9 @@ import { useStill } from '../../lib/stills';
 import { CATEGORY_NAME, marketPrice } from '../../../shared/rules.ts';
 import { FILE_ITEMS, type RockType, type Rules, type SpecimenAdmin, type SpecimenFile } from '../../../shared/types.ts';
 import { Badge, Confirm, Drawer, Empty, ErrorBox, Field, Loading, PageHead, Toggle, go, money, short, useAction, useFetch, when } from '../ui';
+import type { Dealer } from './Dealers';
+
+const rockOf = (s: Partial<SpecimenAdmin>) => (s.dealer_id ? s.dealer_price_usd ?? s.vault_value_usd ?? null : s.vault_value_usd ?? null);
 
 export type SpecRow = SpecimenAdmin & { file_complete: boolean; photo: string | null };
 
@@ -25,6 +28,8 @@ export function Specimens({ openId }: { openId?: string }) {
   const url = `/api/admin/specimens?q=${encodeURIComponent(q)}&state=${state}&category=${cat}${soldBack ? '&sold_back=1' : ''}`;
   const list = useFetch<SpecRow[]>(url);
   const rules = useFetch<Rules>('/api/admin/settings');
+  const dealers = useFetch<Dealer[]>('/api/admin/dealers');
+  const dname = (id?: string | null) => (id ? dealers.data?.find(d => d.id === id)?.name ?? id : null);
   const [editing, setEditing] = useState<SpecRow | 'new' | null>(null);
 
   useEffect(() => {
@@ -35,7 +40,7 @@ export function Specimens({ openId }: { openId?: string }) {
 
   const close = () => { setEditing(null); if (openId) go('#/specimens'); };
   const rows = list.data ?? [];
-  const totals = useMemo(() => ({ n: rows.length, value: rows.reduce((a, r) => a + (r.vault_value_usd ?? 0), 0) }), [rows]);
+  const totals = useMemo(() => ({ n: rows.length, value: rows.reduce((a, r) => a + (rockOf(r) ?? 0), 0) }), [rows]);
 
   return (
     <>
@@ -54,14 +59,15 @@ export function Specimens({ openId }: { openId?: string }) {
       {list.error ? <ErrorBox error={list.error} retry={list.reload} /> : !list.data ? <Loading /> : rows.length === 0 ? <Empty>No specimen matches these filters.</Empty> : (
         <div className="tbl-wrap">
           <table className="tbl hover">
-            <thead><tr><th>Specimen</th><th>Class</th><th className="r">Mass</th><th className="r">Vault value</th><th className="r">Market price</th><th>File</th><th>Status</th><th>Where / owner</th></tr></thead>
+            <thead><tr><th>Specimen</th><th>Class</th><th className="r">Mass</th><th className="r">Rock price</th><th className="r">List price</th><th>Source</th><th>File</th><th>Status</th><th>Where / holder</th></tr></thead>
             <tbody>{rows.map(s => (
               <tr key={s.id} onClick={() => setEditing(s)}>
                 <td><div className="who"><Thumb s={s} /><div><b>{s.name}</b><small className="mono">{s.id}</small></div></div></td>
                 <td>{s.class}</td>
                 <td className="r mono">{s.mass_g} g</td>
-                <td className="r mono">{money(s.vault_value_usd)}</td>
-                <td className="r mono dim">{s.vault_value_usd != null && rules.data ? money(marketPrice(s.vault_value_usd, rules.data)) : '—'}</td>
+                <td className="r mono">{money(rockOf(s))}</td>
+                <td className="r mono dim">{rockOf(s) != null && rules.data ? money(marketPrice(rockOf(s)!, rules.data)) : '—'}</td>
+                <td>{s.dealer_id ? <><span className="small">{dname(s.dealer_id)}</span>{s.source_status === 'sold' && <> <Badge v="sold_at_source" /></>}</> : <span className="dim small">Own stock</span>}</td>
                 <td><span className={'fileq' + (s.file_complete ? ' ok' : '')}>{fileCount(s.file)}/{FILE_ITEMS.length}</span></td>
                 <td><Badge v={s.state} />{s.sold_back && <Badge v="rolled">sold back</Badge>}</td>
                 <td className="mono dim">{s.state === 'series' ? 'Series ' + s.series_id : s.state === 'locked' ? s.drop_id : s.owner ? short(s.owner) : s.vault_id ?? '—'}</td>
@@ -71,22 +77,29 @@ export function Specimens({ openId }: { openId?: string }) {
         </div>
       )}
 
-      {editing && <Editor key={editing === 'new' ? 'new' : editing.id} initial={editing === 'new' ? null : editing} rules={rules.data} onClose={close} onSaved={() => list.reload()} />}
+      {editing && <Editor key={editing === 'new' ? 'new' : editing.id} initial={editing === 'new' ? null : editing} rules={rules.data} dealers={dealers.data ?? []} onClose={close} onSaved={() => list.reload()} />}
     </>
   );
 }
 
 const blank = (): Partial<SpecRow> => ({ name: '', class: '', category: 'stone', mass_g: 0, origin: '', fall: null, vault_value_usd: null, vault_id: '', notes: '', file: { photos: [] }, render_seed: Math.floor(Math.random() * 900) + 10 });
 
-function Editor({ initial, rules, onClose, onSaved }: { initial: SpecRow | null; rules: Rules | null; onClose: () => void; onSaved: () => void }) {
+function Editor({ initial, rules, dealers, onClose, onSaved }: { initial: SpecRow | null; rules: Rules | null; dealers: Dealer[]; onClose: () => void; onSaved: () => void }) {
   const [s, setS] = useState<Partial<SpecRow>>(() => initial ?? blank());
   const [cur, setCur] = useState<SpecRow | null>(initial);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [confirmSas, setConfirmSas] = useState(false);
   const { busy, run } = useAction();
   const set = (k: keyof SpecRow, v: unknown) => setS(x => ({ ...x, [k]: v }));
   const setFile = (k: keyof SpecimenFile, v: unknown) => setS(x => ({ ...x, file: { ...(x.file ?? {}), [k]: v } }));
   const history = useFetch<{ history: any[] }>(cur ? '/api/admin/specimens/' + cur.id : null, [cur?.updated_at]);
   const valueLocked = !!cur && ['series', 'locked', 'held', 'redeeming', 'redeemed'].includes(cur.state);
+  const dealerLocked = !!cur && ['held', 'redeeming', 'redeemed'].includes(cur.state);
+  /** Source actions return a status, not the specimen: reload it afterwards. */
+  const srcAct = async (path: string, msg: string, body: unknown = {}) => {
+    const r = await run(() => api('POST', `/api/admin/specimens/${cur!.id}/${path}`, body), msg);
+    if (r) { const x = await api<{ specimen: SpecRow }>('GET', '/api/admin/specimens/' + cur!.id); setCur(x.specimen); setS(x.specimen); onSaved(); }
+  };
 
   const save = async () => {
     const body = { ...s, fall: s.fall === null || (s.fall as unknown) === '' ? null : s.fall };
@@ -128,7 +141,7 @@ function Editor({ initial, rules, onClose, onSaved }: { initial: SpecRow | null;
       {cur && (
         <div className="ed-status">
           <Badge v={cur.state} />{cur.sold_back && <Badge v="rolled">sold back</Badge>}
-          <span className="dim">{cur.state === 'draft' ? 'File incomplete: it cannot be listed or sealed until all seven items are on file.' : cur.state === 'vault' ? 'Ready: list it on the market, seal it into a series or lock it in a launch drop.' : cur.state === 'series' ? `Sealed in series ${cur.series_id}.` : cur.state === 'locked' ? `Locked in ${cur.drop_id}.` : cur.owner ? `Owner ${short(cur.owner)}${cur.mint ? ' · mint ' + short(cur.mint) : ''}` : ''}</span>
+          <span className="dim">{cur.state === 'held' && cur.dealer_id ? `Reserved by ${short(cur.owner)}${cur.mint ? ' · mint ' + short(cur.mint) : ''}` : cur.state === 'draft' ? 'File incomplete: it cannot be listed or sealed until all seven items are on file.' : cur.state === 'vault' ? 'Ready: list it on the market, seal it into a series or lock it in a launch drop.' : cur.state === 'series' ? `Sealed in series ${cur.series_id}.` : cur.state === 'locked' ? `Locked in ${cur.drop_id}.` : cur.owner ? `Owner ${short(cur.owner)}${cur.mint ? ' · mint ' + short(cur.mint) : ''}` : ''}</span>
           <span className="grow" />
           <Toggle checked={(cur.featured ?? 0) > 0} onChange={v => act('feature', v ? 'Shown on the site register' : 'Hidden from the site register', { featured: v })} label="Feature on site" />
         </div>
@@ -147,11 +160,40 @@ function Editor({ initial, rules, onClose, onSaved }: { initial: SpecRow | null;
           <Field label="Origin country"><input value={s.origin ?? ''} onChange={e => set('origin', e.target.value)} placeholder="Morocco" /></Field>
           <Field label="Fall year or find" hint="Year of an observed fall, or “find”"><input value={s.fall ?? ''} onChange={e => set('fall', e.target.value === '' ? null : e.target.value === 'find' ? 'find' : e.target.value)} placeholder="2011 or find" /></Field>
           <Field label="Vault ID"><input value={s.vault_id ?? ''} onChange={e => set('vault_id', e.target.value)} placeholder="V1-A03" /></Field>
-          <Field label="Vault value, USD" hint={valueLocked ? 'Fixed while sealed, locked or held' : rules && s.vault_value_usd ? `Market price ${money(marketPrice(Number(s.vault_value_usd), rules))} · buyback ${money(Number(s.vault_value_usd) * rules.buyback_share)}` : 'The documented purchase price (invoice)'}>
-            <input type="number" step="0.01" value={s.vault_value_usd ?? ''} disabled={valueLocked} onChange={e => set('vault_value_usd', e.target.value === '' ? null : e.target.value)} />
-          </Field>
+          {s.dealer_id ? (
+            <Field label="Rock value, USD" hint="Follows the dealer price (set under Source)"><input type="number" value={s.dealer_price_usd ?? ''} disabled /></Field>
+          ) : (
+            <Field label="Rock value, USD" hint={valueLocked ? 'Fixed while sealed, locked or held' : rules && s.vault_value_usd ? `Market price ${money(marketPrice(Number(s.vault_value_usd), rules))} · buyback ${money(Number(s.vault_value_usd) * rules.buyback_share)}` : 'The documented purchase price (invoice)'}>
+              <input type="number" step="0.01" value={s.vault_value_usd ?? ''} disabled={valueLocked} onChange={e => set('vault_value_usd', e.target.value === '' ? null : e.target.value)} />
+            </Field>
+          )}
         </div>
       </div>
+
+      <h3 className="ed-h">Source <span className="mono dim">{s.dealer_id ? 'dealer-sourced · reserved on purchase, bought from the dealer at redemption' : 'own stock · pack pulls and instant buyback'}</span></h3>
+      <div className="form-grid">
+        <Field label="Dealer" span={2} hint={dealerLocked ? 'Fixed while reserved or redeemed' : 'Never shown on the site before redemption'}>
+          <select value={s.dealer_id ?? ''} disabled={dealerLocked} onChange={e => set('dealer_id', e.target.value || null)}>
+            <option value="">Own stock (no dealer)</option>
+            {dealers.map(d => <option key={d.id} value={d.id}>{d.name}{d.active ? '' : ' (paused)'}</option>)}
+          </select>
+        </Field>
+        {s.dealer_id && <>
+          <Field label="Dealer price, USD" hint={rules && s.dealer_price_usd ? `List price ${money(marketPrice(Number(s.dealer_price_usd), rules))}. Reservations keep the price they paid.` : 'The dealer’s current asking price'}><input type="number" step="0.01" value={s.dealer_price_usd ?? ''} onChange={e => set('dealer_price_usd', e.target.value === '' ? null : e.target.value)} /></Field>
+          <Field label="Dealer SKU"><input value={s.dealer_sku ?? ''} onChange={e => set('dealer_sku', e.target.value)} placeholder="ATL-869-12" /></Field>
+          <Field label="Dealer listing link" span={2}><input value={s.dealer_url ?? ''} onChange={e => set('dealer_url', e.target.value)} placeholder="https://…" /></Field>
+        </>}
+      </div>
+      {cur?.dealer_id && cur.dealer_id === s.dealer_id && (
+        <div className="src-row">
+          {cur.source_status === 'sold' ? <Badge v="sold_at_source" /> : <Badge v="active">available at the dealer</Badge>}
+          <span className="dim small">last checked {when(cur.source_verified_at)}</span>
+          <span className="grow" />
+          {cur.dealer_url && <a className="ab ghost sm" href={cur.dealer_url} target="_blank" rel="noreferrer">Dealer page ↗</a>}
+          <button className="ab ghost sm" disabled={busy} onClick={() => srcAct('source-verified', cur.source_status === 'sold' ? 'Available again at the dealer' : 'Price and availability confirmed', { price_usd: s.dealer_price_usd })}>{cur.source_status === 'sold' ? 'Available again' : 'Mark verified'}</button>
+          {cur.source_status !== 'sold' && <button className="ab danger ghost sm" disabled={busy} onClick={() => setConfirmSas(true)}>Sold at source</button>}
+        </div>
+      )}
 
       <h3 className="ed-h">Listing photos <span className="mono dim">{(file.photos ?? []).length} · shown on the market next to the 3D model</span></h3>
       <PhotoManager photos={file.photos ?? []} busy={busy} onUpload={upload} onChange={setPhotos} />
@@ -182,7 +224,8 @@ function Editor({ initial, rules, onClose, onSaved }: { initial: SpecRow | null;
         </>
       )}
 
-      {confirmDel && cur && <Confirm danger title={`Delete ${cur.name}?`} body={<p>{cur.id} is removed from the vault records. This cannot be undone.</p>} cta="Delete" onClose={() => setConfirmDel(false)} onConfirm={async () => { const r = await run(() => api('DELETE', '/api/admin/specimens/' + cur.id), 'Deleted'); if (r) { onSaved(); onClose(); } }} />}
+      {confirmSas && cur && <Confirm danger title={`${cur.name} sold at source?`} body={<p>The dealer sold it elsewhere. It leaves the market{cur.state === 'held' ? '; its holder is asked to choose a replacement at the same or lower price, or a full refund of everything paid' : ''}. Any collector listing is taken down.</p>} cta="Mark sold at source" onClose={() => setConfirmSas(false)} onConfirm={() => srcAct('sold-at-source', 'Marked sold at source')} />}
+      {confirmDel && cur && <Confirm danger title={`Delete ${cur.name}?`} body={<p>{cur.id} is removed from the records. This cannot be undone.</p>} cta="Delete" onClose={() => setConfirmDel(false)} onConfirm={async () => { const r = await run(() => api('DELETE', '/api/admin/specimens/' + cur.id), 'Deleted'); if (r) { onSaved(); onClose(); } }} />}
     </Drawer>
   );
 }

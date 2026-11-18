@@ -2,13 +2,14 @@ import { useEffect, useState } from 'react';
 import { api } from '../../lib/api';
 import { BAND_NAME, BANDS } from '../../../shared/rules.ts';
 import type { Band, Rules } from '../../../shared/types.ts';
-import { Card, Confirm, ErrorBox, Field, Loading, PageHead, Toggle, money, useAction, useFetch } from '../ui';
+import { Card, Confirm, ErrorBox, Field, Loading, PageHead, Segmented, Toggle, money, useAction, useFetch } from '../ui';
 
 const P = (x: number) => Math.round(x * 10000) / 100; // 0.85 -> 85
 const F = (s: string) => Number(s) / 100;
 
 export function Settings() {
   const d = useFetch<Rules>('/api/admin/settings');
+  const tok = useFetch<{ enabled: boolean; source: string; price_usd: number | null; samples: number; error: string | null }>('/api/admin/token', [d.data]);
   const [r, setR] = useState<Rules | null>(null);
   const [country, setCountry] = useState('');
   const [reset, setReset] = useState(false);
@@ -23,7 +24,7 @@ export function Settings() {
   const edgeOk = Math.abs(edge - (1 - r.ev_target)) < 0.0001;
   const totalCount = BANDS.reduce((a, b) => a + r.bands[b].count, 0);
   const dirty = JSON.stringify(r) !== JSON.stringify(d.data);
-  const save = async () => { const x = await run(() => api<Rules>('PUT', '/api/admin/settings', r), 'Settings saved'); if (x) d.setData(x); };
+  const save = async () => { const x = await run(() => api<Rules>('PUT', '/api/admin/settings', r), 'Settings saved'); if (x) { d.setData(x); tok.reload(); } };
 
   return (
     <>
@@ -34,10 +35,10 @@ export function Settings() {
       <p className="lede">All numbers are proposals until confirmed. Changes apply to new sales immediately; sealed series keep the composition they were opened with.</p>
 
       <div className="grid2">
-        <Card title="Market and buyback">
+        <Card title="Market commission and buyback">
           <div className="form-grid">
-            <Field label="Market markup, %" hint={`Market price = vault value × ${r.market_markup}. $100 vault → ${money(100 * r.market_markup)}`}><input type="number" step="0.5" value={P(r.market_markup) - 100} onChange={e => set({ market_markup: 1 + F(e.target.value) })} /></Field>
-            <Field label="Instant buyback, % of vault value" hint="Paid in USDC. Must stay below 100% so a sell-back never loses money."><input type="number" step="0.5" value={P(r.buyback_share)} onChange={e => set({ buyback_share: F(e.target.value) })} /></Field>
+            <Field label="Market commission, %" hint={`List price = dealer price × ${r.market_markup}. $100 rock → ${money(100 * r.market_markup)}. On cancel the rock price is refunded, the commission kept.`}><input type="number" step="0.5" value={P(r.market_markup) - 100} onChange={e => set({ market_markup: 1 + F(e.target.value) })} /></Field>
+            <Field label="Instant buyback, % of rock value" hint="Pack pulls (own stock) only. Paid in USDC; must stay below 100%."><input type="number" step="0.5" value={P(r.buyback_share)} onChange={e => set({ buyback_share: F(e.target.value) })} /></Field>
             <Field label="Secondary royalty, %" hint="Metaplex Core royalty, goes to inventory"><input type="number" step="0.5" value={P(r.royalty)} onChange={e => set({ royalty: F(e.target.value) })} /></Field>
           </div>
         </Card>
@@ -106,6 +107,28 @@ export function Settings() {
             <Toggle checked={r.sample_notice} onChange={v => set({ sample_notice: v })} label="“Sample data on this page” in the footer" hint="Remove at launch." />
             <Toggle checked={r.market_funds_buyback} onChange={v => set({ market_funds_buyback: v })} label="Market revenue also funds the $ROCKS buyback" hint="Open decision 4. Off = pack sales only." />
           </div>
+        </Card>
+      </div>
+
+      <div className="grid2">
+        <Card title="Dealer sourcing">
+          <div className="form-grid">
+            <Field label="Max age of a dealer price, hours" hint="Checkout refuses a dealer price checked longer ago than this, until you mark it verified. 0 = off."><input type="number" min={0} value={r.source_max_age_hours} onChange={e => set({ source_max_age_hours: Number(e.target.value) })} /></Field>
+          </div>
+          <p className="dim small">Dealers, their shipping rates and CSV imports are under Inventory › Dealers. Redemption shipping for dealer specimens comes from the dealer’s rates, not the flat fee above.</p>
+        </Card>
+        <Card title={<>Pay with ${r.token_symbol || 'token'} <span className="mono dim">{r.token_enabled ? 'on' : 'dormant'}</span></>}>
+          <div className="tgls"><Toggle checked={r.token_enabled} onChange={v => set({ token_enabled: v })} label="Accept the token at checkout" hint="Off until the token exists. Market reservations only." /></div>
+          <div className="form-grid">
+            <Field label="Symbol"><input value={r.token_symbol} onChange={e => set({ token_symbol: e.target.value.toUpperCase().slice(0, 10) })} /></Field>
+            <Field label="Decimals"><input type="number" value={r.token_decimals} onChange={e => set({ token_decimals: Number(e.target.value) })} /></Field>
+            <Field label="Mint address" span={3}><input value={r.token_mint} onChange={e => set({ token_mint: e.target.value.trim() })} placeholder="Set once the token is created" /></Field>
+            <Field label="Discount for paying in token, %"><input type="number" step="0.5" value={P(r.token_discount)} onChange={e => set({ token_discount: F(e.target.value) })} /></Field>
+            <Field label="Share of commission to burn, %" hint="Reserved per token sale"><input type="number" step="1" value={P(r.token_burn_share)} onChange={e => set({ token_burn_share: F(e.target.value) })} /></Field>
+            <Field label="Price source" span={3} hint="Price = average of the last 5 minutes (sampled every 30 s)"><Segmented<'manual' | 'jupiter'> value={r.token_price_source} onChange={v => set({ token_price_source: v })} options={[['manual', 'Manual'], ['jupiter', 'Jupiter (live)']]} /></Field>
+            {r.token_price_source === 'manual' && <Field label="Token price, USD"><input type="number" step="0.000001" value={r.token_manual_price_usd} onChange={e => set({ token_manual_price_usd: Number(e.target.value) })} /></Field>}
+          </div>
+          <p className="dim small">{tok.data ? (tok.data.price_usd != null ? `Current price ${tok.data.price_usd} USD (${tok.data.samples} samples).` : tok.data.error ? 'No price: ' + tok.data.error : 'No price yet.') : ''}</p>
         </Card>
       </div>
 

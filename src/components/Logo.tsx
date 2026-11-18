@@ -9,7 +9,7 @@ export const NAV = [
   ['#market', 'Market'],
   ['#packs', 'Packs'],
   ['#drops', 'Launch drops'],
-  ['#vault', 'The vault'],
+  ['#vault', 'Register'],
   ['#rocks', '$ROCKS'],
   ['#faq', 'FAQ'],
 ] as const;

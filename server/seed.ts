@@ -6,6 +6,7 @@ import type { Band, RockType } from '../shared/types.ts';
 import { DEFAULT_RULES, bandOf } from '../shared/rules.ts';
 import { all, db, get, now, run, tx } from './db.ts';
 import { addSlots, openPack } from './ops.ts';
+import { migrateDealerModel } from './sources.ts';
 import { seriesRow } from './store.ts';
 import { b58encode, randomHex, sha256 } from './util.ts';
 import crypto from 'node:crypto';
@@ -137,6 +138,7 @@ export function seed() {
 export function ensureSeeded() {
   if (!get('SELECT 1 FROM specimens LIMIT 1')) seed();
   topUpMarket();
+  migrateDealerModel();
   // Mars Window: exclusive until the current Earth-Mars launch window closes (dev note).
   run("UPDATE series SET ends_at = '2026-12-31T23:59:59Z' WHERE id = 'MW' AND ends_at IS NULL");
 }
@@ -146,6 +148,7 @@ export function reseed() {
   tx(() => { for (const t of tables) db.exec(`DELETE FROM ${t}`); });
   seed();
   topUpMarket();
+  migrateDealerModel();
 }
 
 export type { Band };

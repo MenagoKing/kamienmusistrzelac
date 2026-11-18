@@ -3,9 +3,9 @@ import type { LaunchDrop, Series } from '../../../shared/types.ts';
 import { Badge, Card, ErrorBox, Loading, PageHead, Stat, ago, money, money0, short, useFetch, when } from '../ui';
 
 interface OverviewData {
-  revenue: { packs: number; market: number; redemption_fees: number; buybacks_paid: number; royalties: number; secondary_volume: number };
+  revenue: { packs: number; market: number; commission: number; commission_kept_on_cancel: number; token_burn_reserved: number; redemption_fees: number; buybacks_paid: number; royalties: number; secondary_volume: number };
   reserves: { rocks_buyback: number; launch_reserve: number; ops: number; inventory: number };
-  counts: { specimens: number; by_state: Record<string, number>; vault_value: number; packs_opened: number; wallets: number; waitlist: number; redemptions_open: number; drafts: number; sold_back_waiting: number };
+  counts: { specimens: number; by_state: Record<string, number>; vault_value: number; packs_opened: number; wallets: number; waitlist: number; redemptions_open: number; drafts: number; sold_back_waiting: number; escrow_locked: number; reservations_active: number; sold_at_source_waiting: number; dealer_orders_due: number; dealer_orders_overdue: number };
   days: { day: string; packs: number; market: number; buyback: number }[];
   series: Series[];
   drop: LaunchDrop | null;
@@ -49,7 +49,7 @@ function SeriesMini({ s }: { s: Series }) {
   );
 }
 
-const KIND: Record<string, string> = { pack: 'Pack opened', market_buy: 'Market sale', secondary_sale: 'Collector sale', seller_payout: 'Seller payout', buyback: 'Buyback paid', redemption_fee: 'Redemption', redemption_refund: 'Refund', raffle: 'Drop raffle' };
+const KIND: Record<string, string> = { reservation: 'Market reservation', reservation_cancel: 'Reservation cancelled', reservation_refund: 'Full refund', replacement_refund: 'Replacement', price_difference_refund: 'Price drop refunded', price_difference_topup: 'Price top-up', escrow_release: 'Escrow released', pack: 'Pack opened', market_buy: 'Market sale', secondary_sale: 'Collector sale', seller_payout: 'Seller payout', buyback: 'Buyback paid', redemption_fee: 'Redemption', redemption_refund: 'Refund', raffle: 'Drop raffle' };
 
 export function Overview() {
   const { data, error, loading, reload } = useFetch<OverviewData>('/api/admin/overview');
@@ -59,7 +59,10 @@ export function Overview() {
   const { revenue: r, reserves: rs, counts: c } = data;
   const gross = r.packs + r.market + r.redemption_fees + r.royalties;
   const todo: { t: string; href: string; n: number }[] = [
-    { t: 'redemptions to ship', href: '#/redemptions', n: c.redemptions_open },
+    { t: 'dealer orders past the 48-hour deadline', href: '#/redemptions', n: c.dealer_orders_overdue },
+    { t: 'dealer orders to place', href: '#/redemptions', n: c.dealer_orders_due - c.dealer_orders_overdue },
+    { t: 'redemptions to ship', href: '#/redemptions', n: c.redemptions_open - c.dealer_orders_due },
+    { t: 'holders choosing a replacement or refund (sold at source)', href: '#/escrow', n: c.sold_at_source_waiting },
     { t: 'specimens with an incomplete file', href: '#/specimens', n: c.drafts },
     { t: 'sold-back specimens waiting for the next series', href: '#/specimens', n: c.sold_back_waiting },
   ].filter(x => x.n > 0);
@@ -71,9 +74,9 @@ export function Overview() {
       </PageHead>
 
       <div className="stats4">
-        <Stat label="Gross sales" value={money0(gross)} hint={`${money0(r.packs)} packs · ${money0(r.market)} market`} tone="hot" />
+        <Stat label="Gross sales" value={money0(gross)} hint={`${money0(r.packs)} packs · ${money0(r.market)} market · ${c.specimens} specimens`} tone="hot" />
         <Stat label="Buybacks paid" value={money0(r.buybacks_paid)} hint={`USDC · collector trades ${money0(r.secondary_volume)}, royalties ${money(r.royalties)}`} />
-        <Stat label="Vault value" value={money0(c.vault_value)} hint={`${c.specimens} specimens on record`} />
+        <Stat label="Held in escrow" value={money0(c.escrow_locked)} hint={`${c.reservations_active} active reservations · commission ${money0(r.commission)}`} />
         <Stat label="Packs opened" value={c.packs_opened.toLocaleString()} hint={`${c.wallets} collectors · ${c.waitlist} on the waitlist`} />
       </div>
 
@@ -95,7 +98,7 @@ export function Overview() {
         <Card title="Needs attention">
           {todo.length ? (
             <ul className="todo">{todo.map(t => <li key={t.t}><a href={t.href}><b>{t.n}</b>{t.t}<span>→</span></a></li>)}</ul>
-          ) : <p className="dim">Nothing waiting. The vault is in order.</p>}
+          ) : <p className="dim">Nothing waiting. Everything is in order.</p>}
           {data.drop && (
             <a className="dropmini" href={'#/drops/' + data.drop.id}>
               <div><span className="mono dim">Next launch drop</span><b>{data.drop.name}</b></div>

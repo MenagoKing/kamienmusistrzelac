@@ -14,7 +14,8 @@ export type Band = 'floor' | 'par' | 'hit';
 /** Pack tiers from the brief. A series belongs to one tier. */
 export type Tier = 'earth' | 'orbit' | 'mars' | 'launch';
 
-export type Currency = 'USDC' | 'SOL';
+/** USDC and SOL, plus TOKEN ($ROCKS) once the token is switched on in settings. */
+export type Currency = 'USDC' | 'SOL' | 'TOKEN';
 
 /** Where a specimen is. Stored as a plain string on the server. */
 export type SpecimenState =
@@ -55,7 +56,7 @@ export const FILE_ITEMS: { key: keyof SpecimenFile; label: string }[] = [
   { key: 'photos', label: 'Macro photos and 360° turn' },
   { key: 'coa', label: 'Certificate of authenticity' },
   { key: 'provenance', label: 'Provenance and export papers' },
-  { key: 'invoice', label: 'Purchase invoice (sets vault value)' },
+  { key: 'invoice', label: 'Dealer price or invoice (sets rock value)' },
   { key: 'capsule_tag', label: 'Sealed capsule, QR / NFC tag' },
 ];
 
@@ -88,6 +89,12 @@ export interface Specimen {
   photos?: string[];
   /** Active collector listing, when the holder has put it up for sale. */
   listing?: { id: string; price_usd: number } | null;
+  /** Sourced from an independent dealer (reserved, bought at redemption) rather than own stock. Never names the dealer. */
+  sourced?: boolean;
+  /** Current source price (the rock's price before commission) for sourced specimens. */
+  source_price_usd?: number | null;
+  /** False once the dealer has sold it elsewhere. */
+  source_available?: boolean;
   render: RenderHint;
 }
 
@@ -147,6 +154,12 @@ export interface SpecimenAdmin {
   notes: string;
   render_seed: number;
   featured?: number;
+  dealer_id?: string | null;
+  dealer_price_usd?: number | null;
+  dealer_sku?: string;
+  dealer_url?: string;
+  source_status?: string;
+  source_verified_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -176,6 +189,15 @@ export interface Rules {
   sample_notice: boolean; // footer line "Sample data on this page"
   market_funds_buyback: boolean; // open decision 4
   google_client_id: string; // Google sign-in (OAuth client ID, public)
+  source_max_age_hours: number; // checkout refuses a source price older than this (0 = off)
+  token_enabled: boolean; // pay with the project token
+  token_symbol: string;
+  token_mint: string;
+  token_decimals: number;
+  token_discount: number; // share off the price when paying with the token
+  token_burn_share: number; // share of the commission on token payments set aside to burn
+  token_price_source: 'manual' | 'jupiter';
+  token_manual_price_usd: number;
 }
 
 export interface Series {
@@ -276,6 +298,8 @@ export interface PageData {
   stats: PageStats;
   listings: Listing[];
   chain: { cluster: string };
+  /** Paying with the project token (off until switched on). */
+  token: { enabled: boolean; symbol: string; discount: number; price_usd: number | null };
 }
 
 export interface Holding extends Specimen {
@@ -283,6 +307,33 @@ export interface Holding extends Specimen {
   acquired_at: string;
   paid_usd: number | null;
   band: Band | null;
+  /** Present for specimens reserved on the market (escrow-backed). */
+  reservation?: Reservation | null;
+}
+
+/** A market purchase under the dealer model: a specific specimen reserved, its rock price held in escrow. */
+export interface Reservation {
+  id: string;
+  status: 'active' | 'sold_at_source' | 'redeeming' | 'redeemed' | 'cancelled' | 'refunded' | 'replaced';
+  reserved_price_usd: number; // the rock's price, held in escrow and refunded on cancel
+  commission_usd: number;
+  paid_usd: number;
+  currency: Currency;
+  escrow_usd: number;
+  escrow_status: 'locked' | 'refunded' | 'released';
+  created_at: string;
+}
+
+/** What redeeming a reservation costs right now. */
+export interface RedeemQuote {
+  reservation_id: string;
+  country: string;
+  shipping_usd: number;
+  insurance_usd: number;
+  reserved_price_usd: number;
+  current_price_usd: number;
+  delta_usd: number; // current - reserved: positive = top up, negative = refunded to you
+  available: boolean;
 }
 
 export interface Redemption {
@@ -292,9 +343,17 @@ export interface Redemption {
   wallet: string;
   name: string;
   address: { line1: string; line2?: string; city: string; postal: string; country: string; email: string; phone?: string };
-  status: 'requested' | 'packing' | 'shipped' | 'delivered' | 'cancelled';
+  status: 'requested' | 'ordered' | 'packing' | 'shipped' | 'delivered' | 'cancelled';
   fee_usd: number;
   tracking: string;
+  /** 'dealer': bought from the source dealer at redemption; 'vault': shipped from own stock (pack pulls). */
+  kind?: 'dealer' | 'vault';
+  /** Named only after redemption. */
+  dealer_name?: string | null;
+  dealer_order_ref?: string;
+  due_at?: string | null;
+  shipping_usd?: number | null;
+  price_delta_usd?: number | null;
   created_at: string;
   updated_at: string;
 }

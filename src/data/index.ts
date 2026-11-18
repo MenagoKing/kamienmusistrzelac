@@ -1,7 +1,7 @@
 // The one data layer for the site. Components import from here only; everything goes to the API
 // (server/app.ts). Prices are never stored: they are computed from vault values with shared/rules.ts.
 import { api } from '../lib/api';
-import type { Currency, Me, PackReveal, PageData, Redemption, Series, SeriesProof, Specimen, TxResult } from './types';
+import type { Currency, Me, PackReveal, PageData, Redemption, Reservation, Series, SeriesProof, Specimen, TxResult } from './types';
 
 export type * from './types';
 
@@ -48,9 +48,9 @@ export async function joinWaitlist(email: string): Promise<void> {
 
 export const getMe = () => api<Me | null>('GET', '/api/me');
 
-export interface Purchase { reveal: PackReveal; payment: TxResult; mint: string }
+export interface Purchase { reveal: PackReveal; payment: TxResult; mint: string | null; reservation?: Reservation | null }
 
-export const buySpecimen = (id: string, currency: Currency) => api<Purchase>('POST', `/api/market/${encodeURIComponent(id)}/buy`, { currency });
+export const buySpecimen = (id: string, currency: Currency, expectedPrice?: number) => api<Purchase>('POST', `/api/market/${encodeURIComponent(id)}/buy`, { currency, expected_price_usd: expectedPrice });
 export const openPack = (seriesId: string, currency: Currency, client_seed: string) => api<Purchase>('POST', `/api/series/${encodeURIComponent(seriesId)}/open`, { currency, client_seed });
 export const sellBack = (id: string) => api<{ payout: TxResult; usd: number }>('POST', `/api/specimens/${encodeURIComponent(id)}/sell-back`, {});
 export const redeemSpecimen = (id: string, form: Record<string, string>) => api<{ redemption: Redemption; payment: TxResult }>('POST', `/api/specimens/${encodeURIComponent(id)}/redeem`, form);

@@ -1,28 +1,46 @@
 import { useEffect, useState } from 'react';
-import { buySpecimen, openPack, sellBack, type Currency, type Listing, type PackReveal, type Series, type Specimen, type TxResult } from '../data';
+import { buySpecimen, openPack, sellBack, type Currency, type Listing, type PackReveal, type Reservation, type Series, type Specimen, type TxResult } from '../data';
 import { api } from '../lib/api';
 import { useApp } from '../lib/store';
 import { useStill } from '../lib/stills';
 import { clientSeed } from '../lib/wallet';
-import { buyback, marketPrice, mass, multiple, originLabel, pct, sol, usd } from '../lib/format';
-import { BANDS, BAND_NAME, TIER_NAME } from '../../shared/rules.ts';
+import { buyback, marketPrice, mass, multiple, originLabel, pct, rockPriceOf, sol, usd } from '../lib/format';
+import { BANDS, BAND_NAME, TIER_NAME, rarityOf, tokenPrice } from '../../shared/rules.ts';
 import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
 import { Media } from './Media';
 import { RockView } from './RockView';
 import type { PlanetKind } from '../lib/planet';
 
-function PayWith({ value, onChange, price }: { value: Currency; onChange: (c: Currency) => void; price: number }) {
+/** Pay with USDC or SOL, and the project token once it is switched on (with its saving shown). */
+function PayWith({ value, onChange, price, allowToken = false }: { value: Currency; onChange: (c: Currency) => void; price: number; allowToken?: boolean }) {
   const { data } = useApp();
+  const tk = data.token;
+  const opts: Currency[] = allowToken && tk?.enabled ? ['USDC', 'SOL', 'TOKEN'] : ['USDC', 'SOL'];
   return (
-    <div className="pay" role="radiogroup" aria-label="Pay with">
-      {(['USDC', 'SOL'] as Currency[]).map(c => (
-        <button key={c} type="button" role="radio" aria-checked={value === c} className={value === c ? 'on' : ''} onClick={() => onChange(c)}>
-          <b className="mono">{c}</b><span>{c === 'USDC' ? usd(price) : sol(price, data.rules)}</span>
-        </button>
-      ))}
+    <div className={'pay' + (opts.length === 3 ? ' three' : '')} role="radiogroup" aria-label="Pay with">
+      {opts.map(c => {
+        const p = c === 'TOKEN' ? tokenPrice(price, data.rules) : price;
+        return (
+          <button key={c} type="button" role="radio" aria-checked={value === c} className={value === c ? 'on' : ''} onClick={() => onChange(c)}>
+            <b className="mono">{c === 'TOKEN' ? '$' + tk.symbol : c}</b>
+            <span>{c === 'USDC' ? usd(p) : c === 'SOL' ? sol(p, data.rules) : tokenUnits(p, tk)}</span>
+            {c === 'TOKEN' && <em className="save mono">Save {usd(price - p)}</em>}
+          </button>
+        );
+      })}
     </div>
   );
+}
+
+const tokenUnits = (usdValue: number, tk: { price_usd: number | null; symbol: string }) =>
+  tk.price_usd ? `${(usdValue / tk.price_usd).toLocaleString('en-US', { maximumFractionDigits: usdValue / tk.price_usd > 100 ? 0 : 2 })} ${tk.symbol}` : '';
+
+/** "Reserve for $110.00", "… for 0.733 SOL", "… for 209 ROCKS" */
+function payLabel(verb: string, cur: Currency, price: number, rules: any, tk: { price_usd: number | null; symbol: string }) {
+  if (cur === 'SOL') return `${verb} for ${sol(price, rules)}`;
+  if (cur === 'TOKEN') return `${verb} for ${tokenUnits(tokenPrice(price, rules), tk)}`;
+  return `${verb} for ${usd(price)}`;
 }
 
 /* ---------- the NFT, live ---------- */
@@ -58,13 +76,66 @@ export function NftLine({ specimenId }: { specimenId: string }) {
   return null;
 }
 
-/* ---------- after the reveal: hold, sell back, redeem, share ---------- */
+/* ---------- after the reveal: hold, cancel or sell back, redeem, share ---------- */
 
-function RevealActions({ reveal, onDone, extra }: { reveal: PackReveal; onDone: () => void; extra?: React.ReactNode }) {
+function RevealActions({ reveal, reservation, onDone, extra, confirm }: { reveal: PackReveal; reservation?: Reservation | null; onDone: () => void; extra?: React.ReactNode; confirm?: boolean }) {
+  if (reservation) return <ReservationActions reveal={reveal} reservation={reservation} onDone={onDone} extra={extra} confirm={confirm} />;
+  return <OwnedActions reveal={reveal} onDone={onDone} extra={extra} confirm={confirm} />;
+}
+
+/** Dealer-sourced: cancel refunds the rock's price (the commission is kept). */
+function ReservationActions({ reveal, reservation, onDone, extra, confirm }: { reveal: PackReveal; reservation: Reservation; onDone: () => void; extra?: React.ReactNode; confirm?: boolean }) {
+  const { open, refresh, toast } = useApp();
+  const sp = reveal.specimen;
+  const [state, setState] = useState<'idle' | 'confirm' | 'busy' | 'done'>(confirm ? 'confirm' : 'idle');
+  const [payout, setPayout] = useState<TxResult | null>(null);
+  const [err, setErr] = useState('');
+  const back = reservation.escrow_usd || reservation.reserved_price_usd;
+  const cancel = async () => {
+    setState('busy'); setErr('');
+    try {
+      const r = await api<{ refunded_usd: number; payout: TxResult }>('POST', `/api/reservations/${reservation.id}/cancel`, {});
+      setPayout(r.payout); setState('done'); await refresh(); toast(`Cancelled: ${usd(r.refunded_usd)} back in USDC`);
+    } catch (e: any) { setErr(e.message); setState('idle'); }
+  };
+  if (reservation.status === 'sold_at_source') return <p className="err">The dealer sold this specimen. Open it from your account to pick a replacement or take a full refund.</p>;
+  if (state === 'done') return (
+    <>
+      <p className="ok">Cancelled. {usd(back)}, the rock’s price, is on its way in USDC; the commission is kept. The NFT is burned.</p>
+      {payout && <TxLine tx={payout.tx} simulated={payout.simulated} label="Refund" />}
+      <div className="acts"><button className="btn" type="button" onClick={onDone}>Done</button>{extra}</div>
+    </>
+  );
+  if (state === 'confirm' || state === 'busy') return (
+    <>
+      <p className="dlg-p">Cancel your reservation of {sp.name}? {usd(back)} (the rock’s price) comes back in USDC; the {usd(reservation.commission_usd)} commission is kept.</p>
+      <div className="acts">
+        <button className="btn" type="button" onClick={cancel} disabled={state === 'busy'}>{state === 'busy' ? <><Spinner label="Cancelling" />Cancelling…</> : `Yes, cancel and get ${usd(back)}`}</button>
+        <button className="btn line" type="button" onClick={() => setState('idle')} disabled={state === 'busy'}>Keep it</button>
+      </div>
+      {err && <p className="err" role="alert">{err}</p>}
+    </>
+  );
+  return (
+    <>
+      <div className="acts">
+        <button className="btn" type="button" onClick={() => { toast('Reserved for you'); onDone(); }}>Keep it</button>
+        <button className="btn line" type="button" onClick={() => setState('confirm')}>Cancel · {usd(back)} back</button>
+        <button className="btn line" type="button" onClick={() => open({ kind: 'redeem', specimen: sp, reservation })}>Redeem</button>
+        <button className="btn line" type="button" onClick={() => open({ kind: 'share', reveal })}>Share</button>
+        {extra}
+      </div>
+      {err && <p className="err" role="alert">{err}</p>}
+    </>
+  );
+}
+
+/** Own stock (pack pulls): instant buyback offer. */
+function OwnedActions({ reveal, onDone, extra, confirm }: { reveal: PackReveal; onDone: () => void; extra?: React.ReactNode; confirm?: boolean }) {
   const { data, open, refresh, toast } = useApp();
   const sp = reveal.specimen;
   const offer = buyback(reveal.vault_value_usd, data.rules);
-  const [state, setState] = useState<'idle' | 'confirm' | 'busy' | 'sold'>('idle');
+  const [state, setState] = useState<'idle' | 'confirm' | 'busy' | 'sold'>(confirm ? 'confirm' : 'idle');
   const [sold, setSold] = useState<TxResult | null>(null);
   const [err, setErr] = useState('');
   const sell = async () => {
@@ -80,7 +151,7 @@ function RevealActions({ reveal, onDone, extra }: { reveal: PackReveal; onDone: 
   );
   if (state === 'confirm' || state === 'busy') return (
     <>
-      <p className="dlg-p">Sell {sp.name} back for {usd(offer)} USDC? The NFT is burned and the specimen returns to the vault.</p>
+      <p className="dlg-p">Sell {sp.name} back for {usd(offer)} USDC? The NFT is burned and the specimen goes into the next pack series.</p>
       <div className="acts">
         <button className="btn" type="button" onClick={sell} disabled={state === 'busy'}>{state === 'busy' ? <><Spinner label="Selling" />Selling…</> : `Yes, sell for ${usd(offer)}`}</button>
         <button className="btn line" type="button" onClick={() => setState('idle')} disabled={state === 'busy'}>Keep it</button>
@@ -104,35 +175,67 @@ function RevealActions({ reveal, onDone, extra }: { reveal: PackReveal; onDone: 
 
 /* ---------- market ---------- */
 
-export function BuyDialog({ specimen }: { specimen: Specimen }) {
+/** Rarity badge: class first, then price. */
+export function Rarity({ type, price }: { type: Specimen['render']['type']; price: number | null | undefined }) {
+  const r = rarityOf(type, price);
+  return <span className={'rar ' + r.toLowerCase()}>{r}</span>;
+}
+
+export function BuyDialog({ specimen: initial }: { specimen: Specimen }) {
   const { data, open, refresh, toast } = useApp();
+  const [specimen, setSpecimen] = useState(initial);
   const [cur, setCur] = useState<Currency>('USDC');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
-  const price = marketPrice(specimen.vault_value_usd!, data.rules);
+  const [gone, setGone] = useState(false);
+  const rock = rockPriceOf(specimen) ?? 0;
+  const price = marketPrice(rock, data.rules);
+  const sourced = !!specimen.sourced;
   const done = specimen.file_done ?? [];
   const buy = async () => {
     setBusy(true); setErr('');
     try {
-      const r = await buySpecimen(specimen.id, cur);
+      const r = await buySpecimen(specimen.id, cur, price);
       await refresh();
-      toast(`${specimen.name} is yours`);
-      open({ kind: 'reveal', reveal: r.reveal, payment: r.payment, via: 'market' });
-    } catch (e: any) { setErr(e.message); setBusy(false); }
+      toast(sourced ? `${specimen.name} is reserved for you` : `${specimen.name} is yours`);
+      open({ kind: 'reveal', reveal: r.reveal, payment: r.payment, via: 'market', reservation: r.reservation ?? null });
+    } catch (e: any) {
+      setBusy(false);
+      const d = e?.data;
+      if (d?.code === 'changed' || d?.available === false) {
+        // Live re-check: the dealer's price or availability changed. Stop, show the fresh state.
+        try { const fresh = await api<Specimen>('GET', `/api/specimens/${specimen.id}`); setSpecimen(fresh); } catch { /* keep */ }
+        refresh();
+        if (d?.available === false) setGone(true);
+      }
+      setErr(e.message);
+    }
   };
   return (
-    <Overlay label={`Buy ${specimen.name}`} wide title={<div className="sec mono"><span>The market</span><span>{specimen.id}</span></div>}>
+    <Overlay label={`Reserve ${specimen.name}`} wide title={<div className="sec mono"><span>The market</span><span>{specimen.id}</span></div>}>
       <div className="co">
         <Media hint={specimen.render} photos={specimen.photos} label={specimen.name} className="co-ph" />
         <div className="co-bd">
+          <Rarity type={specimen.render.type} price={rock} />
           <h3>{specimen.name}</h3>
           <div className="cl mono">{specimen.class} · {mass(specimen.mass_g)} · {originLabel(specimen)}</div>
           <ul className="chk">{FILE_ITEMS.map((f, i) => <li key={f.key} className={done[i] ? 'y' : ''}>{f.label}</li>)}</ul>
-          <dl className="kv"><dt>Vault value</dt><dd>{usd(specimen.vault_value_usd!)}</dd><dt>Fixed price</dt><dd>{usd(price)}</dd><dt>Instant offer if you sell back, {pct(data.rules.buyback_share)}%</dt><dd>{usd(buyback(specimen.vault_value_usd!, data.rules))}</dd></dl>
-          <PayWith value={cur} onChange={setCur} price={price} />
+          {sourced ? (
+            <dl className="kv">
+              <dt>Rock price, held in escrow</dt><dd>{usd(rock)}</dd>
+              <dt>Commission, {pct(data.rules.market_markup - 1)}%</dt><dd>{usd(price - rock)}</dd>
+              <dt>You pay</dt><dd className="hot">{usd(price)}</dd>
+              <dt>If you cancel later</dt><dd>{usd(rock)} back</dd>
+            </dl>
+          ) : (
+            <dl className="kv"><dt>Rock value</dt><dd>{usd(rock)}</dd><dt>Fixed price</dt><dd>{usd(price)}</dd><dt>Instant offer if you sell back, {pct(data.rules.buyback_share)}%</dt><dd>{usd(buyback(rock, data.rules))}</dd></dl>
+          )}
+          <PayWith value={cur} onChange={setCur} price={price} allowToken={sourced} />
           {err && <p className="err" role="alert">{err}</p>}
-          <button className="btn wide" type="button" onClick={buy} disabled={busy}>{busy ? <><Spinner label="Paying" />Confirming…</> : `Buy for ${cur === 'USDC' ? usd(price) : sol(price, data.rules)}`}</button>
-          <p className="fine">Minted to you as a Metaplex Core NFT on Solana with the full specimen file. Payments on this preview are simulated: nothing is charged.</p>
+          <button className="btn wide" type="button" onClick={buy} disabled={busy || gone}>{busy ? <><Spinner label="Checking with the dealer" />Checking price and availability…</> : gone ? 'No longer available' : payLabel(sourced ? 'Reserve' : 'Buy', cur, price, data.rules, data.token)}</button>
+          <p className="fine">{sourced
+            ? 'Sourced from an independent certified dealer, purchased and shipped when you redeem. Reserved for you the moment you pay and minted to you as an NFT on Solana. Price and availability are checked again when you confirm.'
+            : 'From our own stock. Minted to you as a Metaplex Core NFT on Solana with the full specimen file.'} Payments on this preview are simulated: nothing is charged.</p>
         </div>
       </div>
     </Overlay>
@@ -146,6 +249,7 @@ export function BuyListingDialog({ listing }: { listing: Listing }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const done = sp.file_done ?? [];
+  const rock = rockPriceOf(sp);
   const buy = async () => {
     setBusy(true); setErr('');
     try {
@@ -160,17 +264,22 @@ export function BuyListingDialog({ listing }: { listing: Listing }) {
       <div className="co">
         <Media hint={sp.render} photos={sp.photos} label={sp.name} className="co-ph" />
         <div className="co-bd">
+          <Rarity type={sp.render.type} price={rock} />
           <h3>{sp.name}</h3>
           <div className="cl mono">{sp.class} · {mass(sp.mass_g)} · {originLabel(sp)}</div>
           <p className="seller mono">Listed by <b>{listing.seller}</b></p>
           <ul className="chk">{FILE_ITEMS.map((f, i) => <li key={f.key} className={done[i] ? 'y' : ''}>{f.label}</li>)}</ul>
-          <dl className="kv"><dt>Vault value</dt><dd>{sp.vault_value_usd != null ? usd(sp.vault_value_usd) : '—'}</dd><dt>Collector’s price</dt><dd>{usd(listing.price_usd)}</dd>{sp.vault_value_usd != null && <><dt>Instant offer if you sell back</dt><dd>{usd(buyback(sp.vault_value_usd, data.rules))}</dd></>}</dl>
+          <dl className="kv">
+            <dt>{sp.sourced ? 'Rock price in its escrow' : 'Rock value'}</dt><dd>{rock != null ? usd(rock) : '—'}</dd>
+            <dt>Collector’s price</dt><dd>{usd(listing.price_usd)}</dd>
+            {rock != null && (sp.sourced ? <><dt>If you cancel later</dt><dd>{usd(rock)} back</dd></> : <><dt>Instant offer if you sell back</dt><dd>{usd(buyback(rock, data.rules))}</dd></>)}
+          </dl>
           <PayWith value={cur} onChange={setCur} price={listing.price_usd} />
           {err && <p className="err" role="alert">{err}</p>}
           {listing.mine ? <p className="ok">This is your listing. Manage it from your account.</p> : (
-            <button className="btn wide" type="button" onClick={buy} disabled={busy}>{busy ? <><Spinner label="Paying" />Confirming…</> : `Buy for ${cur === 'USDC' ? usd(listing.price_usd) : sol(listing.price_usd, data.rules)}`}</button>
+            <button className="btn wide" type="button" onClick={buy} disabled={busy}>{busy ? <><Spinner label="Paying" />Confirming…</> : payLabel('Buy', cur, listing.price_usd, data.rules, data.token)}</button>
           )}
-          <p className="fine">The rock stays sealed in the vault; its NFT moves to you on Solana. {pct(data.rules.royalty)}% of the price goes back to the vault’s inventory. Payments on this preview are simulated.</p>
+          <p className="fine">{sp.sourced ? 'The reservation and its escrow move to you with the NFT; the dealer ships when you redeem.' : 'The NFT moves to you on Solana.'} {pct(data.rules.royalty)}% of the price goes to the platform as a royalty. Payments on this preview are simulated.</p>
         </div>
       </div>
     </Overlay>
@@ -322,7 +431,7 @@ export function PackOpening({ series, currency, seed }: { series: Series; curren
           <p className="brag">You pulled {PIECE[sp.render.type]}.</p>
           <dl className="kv">
             <dt>Pack price</dt><dd>{usd(res.reveal.pack_price_usd)}</dd>
-            <dt>Vault value</dt><dd>{usd(res.reveal.vault_value_usd)}</dd>
+            <dt>Rock value</dt><dd>{usd(res.reveal.vault_value_usd)}</dd>
             <dt>Instant offer, {pct(data.rules.buyback_share)}%</dt><dd className="hot">{usd(buyback(res.reveal.vault_value_usd, data.rules))}</dd>
           </dl>
           <NftLine specimenId={sp.id} />
@@ -337,33 +446,41 @@ export function PackOpening({ series, currency, seed }: { series: Series; curren
 
 /* ---------- the reveal (market buys, holdings) ---------- */
 
-export function RevealDialog({ reveal, payment, via }: { reveal: PackReveal; payment?: TxResult; mint?: string; via: 'pack' | 'market' | 'holding' }) {
-  const { close } = useApp();
+export function RevealDialog({ reveal, payment, via, reservation, confirm }: { reveal: PackReveal; payment?: TxResult; mint?: string; via: 'pack' | 'market' | 'holding'; reservation?: Reservation | null; confirm?: boolean }) {
+  const { close, data } = useApp();
   const sp = reveal.specimen;
-  const chip = via === 'market' ? 'MARKET' : `${reveal.band.toUpperCase()} · ${multiple(reveal.vault_value_usd, reveal.pack_price_usd || reveal.vault_value_usd)}×`;
+  const chip = reservation ? 'RESERVED' : via === 'market' ? 'MARKET' : `${reveal.band.toUpperCase()} · ${multiple(reveal.vault_value_usd, reveal.pack_price_usd || reveal.vault_value_usd)}×`;
   return (
-    <Overlay label={`${sp.name}`} title={<div className="sec mono"><span>{via === 'holding' ? 'Your collection' : 'It’s yours'}</span><span>{sp.id}</span></div>}>
+    <Overlay label={`${sp.name}`} title={<div className="sec mono"><span>{via === 'holding' ? 'Your collection' : reservation ? 'Reserved for you' : 'It’s yours'}</span><span>{sp.id}</span></div>}>
       <div className="reveal in-dlg">
-        <div className="ph r3dph"><RockView hint={sp.render} mode="live" auto={0.35} scale={1.35} label={`${sp.name} in 3D. Drag to turn it.`} /><span className={'chip' + (reveal.band !== 'hit' && via !== 'market' ? ' ' + reveal.band : '')}>{chip}</span></div>
+        <div className="ph r3dph"><RockView hint={sp.render} mode="live" auto={0.35} scale={1.35} label={`${sp.name} in 3D. Drag to turn it.`} /><span className={'chip' + (reveal.band !== 'hit' && via !== 'market' && !reservation ? ' ' + reveal.band : '')}>{chip}</span></div>
         <div className="bd">
           <h3>{sp.name}</h3>
           <div className="cl mono">{sp.class} · {mass(sp.mass_g)} · {sp.id}</div>
-          <RevealKv reveal={reveal} via={via} />
+          <RevealKv reveal={reveal} via={via} reservation={reservation} />
+          {reservation && <p className="fine src-line">Sourced from an independent certified dealer, purchased and shipped when you redeem.</p>}
           {via !== 'holding' && <NftLine specimenId={sp.id} />}
-          <RevealActions reveal={reveal} onDone={close} />
-          {payment && <TxLine tx={payment.tx} simulated={payment.simulated} label={`Paid ${payment.currency === 'SOL' ? payment.amount + ' SOL' : usd(payment.amount)}`} />}
+          <RevealActions reveal={reveal} reservation={reservation} onDone={close} confirm={confirm} />
+          {payment && <TxLine tx={payment.tx} simulated={payment.simulated} label={`Paid ${payment.currency === 'SOL' ? payment.amount + ' SOL' : payment.currency === 'TOKEN' ? payment.amount.toLocaleString('en-US') + ' ' + data.token.symbol : usd(payment.amount)}`} />}
         </div>
       </div>
     </Overlay>
   );
 }
 
-function RevealKv({ reveal, via }: { reveal: PackReveal; via: string }) {
+function RevealKv({ reveal, via, reservation }: { reveal: PackReveal; via: string; reservation?: Reservation | null }) {
   const { data } = useApp();
+  if (reservation) return (
+    <dl className="kv">
+      <dt>You paid</dt><dd>{usd(reservation.paid_usd)}</dd>
+      <dt>Rock price, held in escrow</dt><dd>{usd(reservation.escrow_usd || reservation.reserved_price_usd)}</dd>
+      <dt>If you cancel</dt><dd className="hot">{usd(reservation.escrow_usd || reservation.reserved_price_usd)} back</dd>
+    </dl>
+  );
   return (
     <dl className="kv">
       {via !== 'holding' && <><dt>{via === 'market' ? 'Price paid' : 'Pack price'}</dt><dd>{usd(reveal.pack_price_usd)}</dd></>}
-      <dt>Vault value</dt><dd>{usd(reveal.vault_value_usd)}</dd>
+      <dt>Rock value</dt><dd>{usd(reveal.vault_value_usd)}</dd>
       <dt>Instant offer, {pct(data.rules.buyback_share)}%</dt><dd className="hot">{usd(buyback(reveal.vault_value_usd, data.rules))}</dd>
     </dl>
   );

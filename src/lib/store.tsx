@@ -1,17 +1,17 @@
 // App state for the site and the account page: page data, the signed-in collector, the open dialog, toasts.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { getMe, getPageData, type Holding, type Listing, type Me, type PackReveal, type PageData, type Series, type Specimen, type TxResult } from '../data';
+import { getMe, getPageData, type Currency, type Holding, type Listing, type Me, type PackReveal, type PageData, type Reservation, type Series, type Specimen, type TxResult } from '../data';
 
 export type Dialog =
   | { kind: 'auth'; mode?: 'login' | 'register'; then?: Dialog }
   | { kind: 'buy'; specimen: Specimen }
   | { kind: 'buy-listing'; listing: Listing }
   | { kind: 'pack'; series: Series }
-  | { kind: 'opening'; series: Series; currency: 'USDC' | 'SOL'; seed: string }
-  | { kind: 'reveal'; reveal: PackReveal; payment?: TxResult; mint?: string; via: 'pack' | 'market' | 'holding' }
+  | { kind: 'opening'; series: Series; currency: Currency; seed: string }
+  | { kind: 'reveal'; reveal: PackReveal; payment?: TxResult; mint?: string; via: 'pack' | 'market' | 'holding'; reservation?: Reservation | null; confirm?: boolean }
   | { kind: 'item'; holding: Holding }
   | { kind: 'list'; holding: Holding }
-  | { kind: 'redeem'; specimen: Holding | PackReveal['specimen'] }
+  | { kind: 'redeem'; specimen: Holding | PackReveal['specimen']; reservation?: Reservation | null }
   | { kind: 'share'; reveal: PackReveal }
   | { kind: 'register' }
   | { kind: 'proof'; seriesId: string; name: string };

@@ -8,7 +8,7 @@ import { FILE_ITEMS } from '../../shared/types.ts';
 import { verifySeries, type VerifyResult } from '../../shared/fair.ts';
 import { Overlay, Spinner } from './Overlay';
 
-const FILTERS: [string, string][] = [['', 'All'], ['market', 'Market'], ['series', 'In a series'], ['held', 'Held'], ['locked', 'Launch drop'], ['vault', 'Vault'], ['redeemed', 'Redeemed']];
+const FILTERS: [string, string][] = [['', 'All'], ['market', 'Market'], ['series', 'In a series'], ['held', 'Reserved'], ['locked', 'Launch drop'], ['vault', 'Off the market'], ['redeemed', 'Redeemed']];
 
 function Row({ s }: { s: Specimen }) {
   const { data } = useApp();
@@ -32,14 +32,14 @@ function Row({ s }: { s: Specimen }) {
             {FILE_ITEMS.map((f, i) => <li key={f.key} className={done[i] ? 'y' : ''}>{f.label}</li>)}
             <li className={done[7] ? 'y' : ''}>Minted on Solana{s.mint ? ` · ${s.mint.slice(0, 4)}…${s.mint.slice(-4)}` : ''}</li>
           </ul>
-          {s.vault_value_usd != null && <p className="mono fine">Vault value {usd(s.vault_value_usd)} (documented purchase price)</p>}
+          {s.vault_value_usd != null && <p className="mono fine">{s.sourced ? 'Dealer price' : 'Rock value'} {usd(s.sourced ? s.source_price_usd ?? s.vault_value_usd : s.vault_value_usd)} (documented price)</p>}
         </td></tr>
       )}
     </>
   );
 }
 
-/** The public vault page: every specimen and where it is right now. */
+/** The public register: every specimen and where it is right now. */
 export function RegisterDialog() {
   const { data } = useApp();
   const [q, setQ] = useState('');
@@ -51,7 +51,7 @@ export function RegisterDialog() {
     return () => { alive = false; clearTimeout(t); };
   }, [q, f]);
   return (
-    <Overlay wide label="The vault register" title={<><div className="sec mono"><span>§04</span><span>The vault</span></div><h3>Every rock, on the record.</h3></>}>
+    <Overlay wide label="The specimen register" title={<><div className="sec mono"><span>§04</span><span>The register</span></div><h3>Every rock, on the record.</h3></>}>
       <div className="rbar">
         <input type="search" placeholder="Search name, class or SR number" value={q} onChange={e => setQ(e.target.value)} aria-label="Search the register" data-autofocus />
         <div className="chips">{FILTERS.map(([k, l]) => <button key={k} type="button" className={f === k ? 'on' : ''} onClick={() => setF(k)}>{l}</button>)}</div>

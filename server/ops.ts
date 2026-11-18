@@ -8,7 +8,7 @@ import {
   dropRow, dropStatus, fileComplete, getRules, redemptionOf, seriesRow, specimenRow, toReveal,
   type SeriesRow, type SlotRow,
 } from './store.ts';
-import { cents, drawPickSync, fail, optStr, str, uid } from './util.ts';
+import { HttpError, cents, drawPickSync, fail, optStr, str, uid } from './util.ts';
 
 export function audit(actor: string, action: string, target = '', detail: unknown = {}) {
   run('INSERT INTO audit (actor, action, target, detail, created_at) VALUES (?, ?, ?, ?, ?)', actor, action, target, JSON.stringify(detail), now());
@@ -23,12 +23,15 @@ const currencyOf = (c: unknown): Currency => (c === 'SOL' ? 'SOL' : 'USDC');
 
 /* ---------- market ---------- */
 
-export function buyMarket(wallet: string, id: string, currency: unknown): { reveal: PackReveal; payment: TxResult; mint: string | null } {
+/** Own-stock market purchase (specimens the project holds itself). Dealer-sourced specimens are reserved instead (sources.ts). */
+export function buyMarket(wallet: string, id: string, currency: unknown, expectedPrice?: unknown): { reveal: PackReveal; payment: TxResult; mint: string | null } {
   return tx(() => {
     const s = specimenRow(id) ?? fail(404, 'Specimen not found');
     if (s.state !== 'market' || s.vault_value_usd == null) fail(409, 'This specimen is no longer on the market');
+    if (s.dealer_id) fail(409, 'This specimen is reserved through its dealer');
     const rules = getRules();
     const price = marketPrice(s.vault_value_usd!, rules);
+    if (expectedPrice != null && Math.abs(Number(expectedPrice) - price) > 0.004) throw new HttpError(409, 'The price changed to $' + price.toFixed(2) + '. Check it and confirm again.', { code: 'changed', price_usd: price });
     const payment = chain.charge({ from: wallet, usd: price, currency: currencyOf(currency), solUsd: rules.sol_usd, memo: `market ${id}` });
     run("UPDATE specimens SET state = 'held', owner = ?, acquired_via = 'market', acquired_at = ?, paid_usd = ?, sold_back = 0, updated_at = ? WHERE id = ?",
       wallet, now(), price, now(), id);
@@ -103,7 +106,8 @@ function ownedBy(wallet: string, id: string) {
 export function sellBack(wallet: string, id: string): { payout: TxResult; usd: number } {
   return tx(() => {
     const s = ownedBy(wallet, id);
-    if (s.vault_value_usd == null) fail(409, 'This specimen has no vault value');
+    if (s.dealer_id) fail(409, 'Reserved specimens are cancelled, not sold back');
+    if (s.vault_value_usd == null) fail(409, 'This specimen has no value on record');
     const usd = buybackOffer(s.vault_value_usd!, getRules());
     const payout = chain.payout({ to: wallet, usd, memo: `buyback ${id}` });
     queueBurn(id);
@@ -125,7 +129,8 @@ export function redeem(wallet: string, id: string, body: any): { redemption: Red
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(address.email)) fail(400, 'Enter a valid email');
   if (!rules.shipping_countries.includes(address.country)) fail(400, 'We cannot ship to this country yet');
   return tx(() => {
-    ownedBy(wallet, id);
+    const own = ownedBy(wallet, id);
+    if (own.dealer_id) fail(409, 'Redeem this reservation from your account: the dealer ships it');
     const fee = cents(rules.handling_fee_usd + rules.shipping_usd);
     const payment = chain.charge({ from: wallet, usd: fee, currency: currencyOf(body?.currency), solUsd: rules.sol_usd, memo: `redeem ${id}` });
     queueBurn(id);

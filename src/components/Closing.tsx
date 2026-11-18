@@ -32,10 +32,12 @@ export function Token() {
 
 const FAQ: [string, string][] = [
   ['Is every specimen a real meteorite?', 'Yes. Each one has an official name and classification listed in the Meteoritical Bulletin, a weigh-in on video, a certificate, and provenance and export papers. No file, no listing.'],
-  ['Is the market random?', 'No. Every listed specimen has one fixed price, set from its documented purchase price. You see the exact rock you buy before you pay.'],
-  ['What can a pack be worth?', 'Every pack lands in a band. Floor: 70 to 85% of the pack price in vault value, never below 70%. Par: 90 to 120%. Hit: 150% or more. Each sealed series of 100 holds exactly 78, 19 and 3, published before sale opens, with live counts of what’s left.'],
-  ['What happens to a rock I sell back?', 'You get 85% of its vault value in USDC, instantly. The rock goes into the next unopened series, never the one on sale, so every published count stays exact.'],
-  ['Can I get the actual rock?', 'Yes. Burn the NFT and we ship the sealed capsule to you, insured, to the countries we can ship to. Shipping is charged at cost plus a handling fee.'],
+  ['Is the market random?', 'No. Every listed specimen has one fixed price: the dealer’s price plus our commission. You see the exact rock you reserve before you pay, and the price and availability are checked again when you confirm.'],
+  ['Where are the rocks?', 'With independent certified dealers. When you pay, that specific specimen is reserved for you and its price is held in escrow. It is purchased and shipped when you redeem, ordered within 48 hours.'],
+  ['Can I cancel?', 'Yes, any time before you redeem. The rock’s price comes back in USDC from its escrow; the commission is kept. If the dealer sells the specimen elsewhere first, you choose a replacement at the same or lower price (the difference comes back) or a full refund.'],
+  ['What can a pack be worth?', 'Every pack lands in a band. Floor: 70 to 85% of the pack price in rock value, never below 70%. Par: 90 to 120%. Hit: 150% or more. Each sealed series of 100 holds exactly 78, 19 and 3, published before sale opens, with live counts of what’s left.'],
+  ['What happens to a pack rock I sell back?', 'You get 85% of its rock value in USDC, instantly. The rock goes into the next unopened series, never the one on sale, so every published count stays exact.'],
+  ['Can I get the actual rock?', 'Yes. Choose where it goes and you see the shipping cost and the dealer’s current price first. If the price went up you pay the difference or take a full refund; if it went down, the difference comes back. Then the NFT is burned and the rock ships insured.'],
   ['What happens if a launch is scrubbed?', 'The locked specimens roll over to the next drop, so it grows. Packs you opened stay yours.'],
   ['What is $ROCKS for?', 'Early access to launch drops, and a buyback and burn funded by pack sales. It is not a claim on the vault or on any rock.'],
 ];
@@ -81,8 +83,8 @@ export function Footer() {
   return (
     <footer className="wrap">
       <div className="foot">
-        <div><Logo height={36} /><p>Real meteorites, vaulted and minted on Solana.</p></div>
-        <div><h5>Product</h5><ul><li><a href="#market">Market</a></li><li><a href="#packs">Packs</a></li><li><a href="#drops">Launch drops</a></li><li><a href="#vault">The vault</a></li><li><a href="#rocks">$ROCKS</a></li></ul></div>
+        <div><Logo height={36} /><p>Real meteorites from certified dealers, minted on Solana.</p></div>
+        <div><h5>Product</h5><ul><li><a href="#market">Market</a></li><li><a href="#packs">Packs</a></li><li><a href="#drops">Launch drops</a></li><li><a href="#vault">The register</a></li><li><a href="#rocks">$ROCKS</a></li></ul></div>
         <div><h5>Help</h5><ul><li><a href="#faq">FAQ</a></li><li><a href="#packs">Pack bands and series</a></li><li><a href="#after">Shipping and redemption</a></li></ul></div>
         {/* TODO: Terms and Privacy pages. They point to the top for now. */}
         <div><h5>Legal</h5><ul><li><a href="#top">Terms</a></li><li><a href="#top">Privacy</a></li></ul></div>

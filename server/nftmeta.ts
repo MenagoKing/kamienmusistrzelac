@@ -15,12 +15,14 @@ export function nftJson(req: IncomingMessage, id: string) {
   return {
     name: `${s.name} ${s.id}`,
     symbol: 'ROCK',
-    description: `${s.name}, ${s.class}, ${s.mass_g} g. A real, certified meteorite specimen held in the Space Rocks vault (${s.vault_id ?? 'vault'}). Burn to redeem the physical rock.`,
+    description: s.dealer_id
+      ? `${s.name}, ${s.class}, ${s.mass_g} g. A real, certified meteorite specimen reserved for the holder of this NFT, sourced from an independent certified dealer. Burn to redeem: it is purchased and shipped to you.`
+      : `${s.name}, ${s.class}, ${s.mass_g} g. A real, certified meteorite specimen (${s.vault_id ?? 'Space Rocks'}). Burn to redeem the physical rock.`,
     image,
     external_url: `${base(req)}/#vault`,
     attributes: [
       ['Specimen', s.id], ['Class', s.class], ['Category', s.category], ['Mass (g)', s.mass_g], ['Origin', s.origin ?? 'pending'],
-      ['Fall', s.fall ?? 'unknown'], ['Vault ID', s.vault_id ?? ''], ['Vault value (USD)', s.vault_value_usd ?? ''], ['Meteoritical Bulletin', f.bulletin ?? ''],
+      ['Fall', s.fall ?? 'unknown'], ['Vault ID', s.dealer_id ? '' : s.vault_id ?? ''], ['Rock value (USD)', s.dealer_id ? s.dealer_price_usd ?? s.vault_value_usd ?? '' : s.vault_value_usd ?? ''], ['Sourcing', s.dealer_id ? 'Independent certified dealer' : 'Own stock'], ['Meteoritical Bulletin', f.bulletin ?? ''],
       ['Certificate', f.coa ?? ''], ['Capsule tag', f.capsule_tag ?? ''],
     ].filter(([, v]) => v !== '').map(([trait_type, value]) => ({ trait_type, value })),
     properties: { category: 'image', files: [{ uri: image, type: photo ? 'image/jpeg' : 'image/svg+xml' }] },
@@ -40,7 +42,7 @@ export function nftSvg(id: string) {
 <text x="70" y="120" fill="${accent}" font-family="monospace" font-size="30" letter-spacing="5">${esc(s.id)} · SPACE ROCKS</text>
 <text x="66" y="800" fill="#EFE6DA" font-family="Georgia, serif" font-size="96">${esc(s.name)}</text>
 <text x="70" y="860" fill="#A39484" font-family="monospace" font-size="30" letter-spacing="3">${esc(s.class.toUpperCase())} · ${s.mass_g} G</text>
-<text x="70" y="920" fill="#A39484" font-family="monospace" font-size="24" letter-spacing="4">CERTIFIED · VAULTED · MINTED ON SOLANA</text>
+<text x="70" y="920" fill="#A39484" font-family="monospace" font-size="24" letter-spacing="4">CERTIFIED · DOCUMENTED · MINTED ON SOLANA</text>
 </svg>`;
 }
 
@@ -68,7 +70,7 @@ export function sharePage(req: IncomingMessage, id: string) {
   const hasImg = fs.existsSync(path.join(UPLOAD_DIR, `share-${s.id}.png`));
   const img = hasImg ? `${b}/uploads/share-${s.id}.png` : `${b}/api/nft/${s.id}.svg`;
   const title = `${s.name} · ${s.class} · Space Rocks`;
-  const desc = `A real, certified meteorite: ${s.name}, ${s.class}, ${s.mass_g} g. Vaulted and minted on Solana.`;
+  const desc = `A real, certified meteorite: ${s.name}, ${s.class}, ${s.mass_g} g. Minted on Solana.`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title><meta name="description" content="${esc(desc)}">
 <meta property="og:type" content="website"><meta property="og:site_name" content="Space Rocks"><meta property="og:url" content="${b}/s/${s.id}">

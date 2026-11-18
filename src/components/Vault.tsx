@@ -19,14 +19,14 @@ function Row({ r, i }: { r: Specimen; i: number }) {
   );
 }
 
-/** §04 The vault: public register and the eight items of a specimen file. */
+/** §04 The register: every specimen and the eight items of a specimen file. */
 export function Vault() {
   const { data, open } = useApp();
   return (
     <section className="s wrap" id="vault" aria-labelledby="h-vault">
       <div className="intro rv">
-        <div><div className="sec mono"><span>§04</span><span>The vault</span></div><h2 id="h-vault">Every rock, on the record.</h2></div>
-        <p>Nothing is listed or sealed into a series without a complete file. The public vault page shows every specimen and where it is right now: on the market, in a series, with a collector, or redeemed and shipped.</p>
+        <div><div className="sec mono"><span>§04</span><span>The register</span></div><h2 id="h-vault">Every rock, on the record.</h2></div>
+        <p>Nothing is listed or sealed into a series without a complete file. The public register shows every specimen and where it is right now: on the market at a dealer, in a series, reserved for a collector, or redeemed and shipped.</p>
       </div>
       <table className="reg rv" id="reg">
         <thead><tr><th>Specimen</th><th>Class</th><th>Mass</th><th>Origin</th><th>Where</th><th>Status</th></tr></thead>
@@ -41,7 +41,7 @@ export function Vault() {
         <li><b className="mono">03</b><span>Macro photos and a full 360° turn</span></li>
         <li><b className="mono">04</b><span>Certificate of authenticity</span></li>
         <li><b className="mono">05</b><span>Provenance and export papers, origin checked before purchase</span></li>
-        <li><b className="mono">06</b><span>Purchase invoice, which sets the vault value</span></li>
+        <li><b className="mono">06</b><span>Dealer’s price or purchase invoice, which sets the rock value</span></li>
         <li><b className="mono">07</b><span>Sealed in a tamper-evident capsule with a QR and NFC tag</span></li>
         <li><b className="mono">08</b><span>Minted on Solana with the whole file attached</span></li>
       </ol>

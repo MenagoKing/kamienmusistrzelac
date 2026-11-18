@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { api } from '../lib/api';
-import { redeemSpecimen, type Holding, type PackReveal } from '../data';
+import { redeemSpecimen, type Holding, type PackReveal, type Redemption, type RedeemQuote, type Reservation, type Specimen, type TxResult } from '../data';
 import { useApp } from '../lib/store';
-import { still } from '../lib/stills';
-import { buyback, marketPrice, mass, originLabel, pct, usd } from '../lib/format';
+import { still, useStill } from '../lib/stills';
+import { buyback, liveReservation, marketPrice, marketPriceOf, mass, originLabel, pct, usd } from '../lib/format';
 import { BAND_NAME } from '../../shared/rules.ts';
 import { FILE_ITEMS } from '../../shared/types.ts';
 import { Overlay, Spinner, TxLine } from './Overlay';
 import { Media } from './Media';
-import { NftLine } from './Checkout';
+import { NftLine, Rarity } from './Checkout';
 
 export const holdingReveal = (h: Holding): PackReveal => ({
   pull_id: null, series_id: null, band: h.band ?? 'par', pack_price_usd: h.paid_usd ?? h.vault_value_usd ?? 0, vault_value_usd: h.vault_value_usd ?? 0,
@@ -21,7 +21,35 @@ const regionName = (() => {
   try { const d = new Intl.DisplayNames(['en'], { type: 'region' }); return (c: string) => d.of(c) ?? c; } catch { return (c: string) => c; }
 })();
 
-export function RedeemDialog({ specimen }: { specimen: Holding | PackReveal['specimen'] }) {
+export function RedeemDialog({ specimen, reservation }: { specimen: Holding | PackReveal['specimen']; reservation?: Reservation | null }) {
+  if (reservation && reservation.status === 'active') return <SourcedRedeem specimen={specimen} reservation={reservation} />;
+  return <VaultRedeem specimen={specimen} />;
+}
+
+function AddressFields({ countries, country, onCountry }: { countries: string[]; country?: string; onCountry?: (c: string) => void }) {
+  return (
+    <>
+      <label>Full name<input name="name" required autoComplete="name" /></label>
+      <label>Email<input name="email" type="email" required autoComplete="email" /></label>
+      <label>Address<input name="line1" required autoComplete="address-line1" /></label>
+      <label>Apartment, suite <span className="opt">optional</span><input name="line2" autoComplete="address-line2" /></label>
+      <div className="two">
+        <label>City<input name="city" required autoComplete="address-level2" /></label>
+        <label>Postal code<input name="postal" required autoComplete="postal-code" /></label>
+      </div>
+      <div className="two">
+        <label>Country<select name="country" required value={country ?? undefined} defaultValue={country === undefined ? '' : undefined} onChange={e => onCountry?.(e.target.value)}>
+          <option value="" disabled>Choose</option>
+          {countries.map(c => <option key={c} value={c}>{regionName(c)}</option>)}
+        </select></label>
+        <label>Phone <span className="opt">optional</span><input name="phone" autoComplete="tel" /></label>
+      </div>
+    </>
+  );
+}
+
+/** Own stock (pack pulls): flat handling and shipping, ships from the vault. */
+function VaultRedeem({ specimen }: { specimen: Holding | PackReveal['specimen'] }) {
   const { data, refresh, toast } = useApp();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -41,7 +69,7 @@ export function RedeemDialog({ specimen }: { specimen: Holding | PackReveal['spe
       {done ? (
         <>
           <h3 className="dlg-h">The capsule is coming home.</h3>
-          <p className="dlg-p">We burned the NFT and opened a shipment for {specimen.name}. You’ll get the tracking number by email, and it shows in your vault under Shipments.</p>
+          <p className="dlg-p">We burned the NFT and opened a shipment for {specimen.name}. You’ll get the tracking number by email, and it shows in your account under Shipments.</p>
           <TxLine tx={done.tx} simulated={done.simulated} label="Fee paid" />
           <div className="acts"><a className="btn" href="/account#shipments">See shipments</a></div>
         </>
@@ -49,25 +77,119 @@ export function RedeemDialog({ specimen }: { specimen: Holding | PackReveal['spe
         <form className="fm" onSubmit={submit}>
           <h3 className="dlg-h">Ship {specimen.name} to you.</h3>
           <p className="dlg-p">The NFT is burned and the sealed capsule ships insured. Shipping at cost plus a handling fee.</p>
-          <label>Full name<input name="name" required autoComplete="name" /></label>
-          <label>Email<input name="email" type="email" required autoComplete="email" /></label>
-          <label>Address<input name="line1" required autoComplete="address-line1" /></label>
-          <label>Apartment, suite <span className="opt">optional</span><input name="line2" autoComplete="address-line2" /></label>
-          <div className="two">
-            <label>City<input name="city" required autoComplete="address-level2" /></label>
-            <label>Postal code<input name="postal" required autoComplete="postal-code" /></label>
-          </div>
-          <div className="two">
-            <label>Country<select name="country" required defaultValue="">
-              <option value="" disabled>Choose</option>
-              {countries.map(c => <option key={c} value={c}>{regionName(c)}</option>)}
-            </select></label>
-            <label>Phone <span className="opt">optional</span><input name="phone" autoComplete="tel" /></label>
-          </div>
+          <AddressFields countries={countries} />
           <dl className="kv"><dt>Handling</dt><dd>{usd(data.rules.handling_fee_usd)}</dd><dt>Insured shipping</dt><dd>{usd(data.rules.shipping_usd)}</dd><dt>Total</dt><dd className="hot">{usd(fee)}</dd></dl>
           {err && <p className="err" role="alert">{err}</p>}
           <button className="btn wide" type="submit" disabled={busy}>{busy ? <><Spinner label="Sending" />Sending…</> : `Burn and ship for ${usd(fee)}`}</button>
           <p className="fine">Only countries we can ship to are listed (customs and sanctions screening).</p>
+        </form>
+      )}
+    </Overlay>
+  );
+}
+
+/**
+ * Dealer-sourced (Addendum 1): the shipping quote and any change in the dealer's price are shown
+ * before anything is charged. Higher price: pay the difference or take a full refund. Lower: the
+ * difference comes back. Then the NFT is burned, the escrow goes to buy the rock and the dealer ships.
+ */
+function SourcedRedeem({ specimen, reservation }: { specimen: Holding | PackReveal['specimen']; reservation: Reservation }) {
+  const { data, refresh, toast } = useApp();
+  const countries = [...data.rules.shipping_countries].sort((a, b) => regionName(a).localeCompare(regionName(b)));
+  const [country, setCountry] = useState('');
+  const [quote, setQuote] = useState<RedeemQuote | null>(null);
+  const [quoting, setQuoting] = useState(false);
+  const [choice, setChoice] = useState<'accept' | 'refund'>('accept');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  const [soldOut, setSoldOut] = useState(false);
+  const [done, setDone] = useState<{ redemption?: Redemption; refunded_usd?: number; payment?: TxResult } | null>(null);
+
+  const getQuote = async (c: string) => {
+    setCountry(c); setErr(''); setQuote(null);
+    if (!c) return;
+    setQuoting(true);
+    try {
+      const q = await api<RedeemQuote>('POST', `/api/reservations/${reservation.id}/redeem-quote`, { country: c });
+      setQuote(q);
+      if (!q.available) setSoldOut(true);
+    } catch (e: any) { setErr(e.message); } finally { setQuoting(false); }
+  };
+
+  const submit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!quote) return;
+    const f = Object.fromEntries(new FormData(e.currentTarget).entries()) as Record<string, string>;
+    setBusy(true); setErr('');
+    try {
+      const r = await api<{ redemption?: Redemption; refunded_usd?: number; payment?: TxResult }>('POST', `/api/reservations/${reservation.id}/redeem`, { ...f, expected_delta_usd: quote.delta_usd, price_change: quote.delta_usd > 0 ? choice : undefined });
+      setDone(r); await refresh();
+      toast(r.redemption ? 'Redemption confirmed' : `Refunded ${usd(r.refunded_usd ?? 0)}`);
+    } catch (er: any) {
+      const d = er?.data;
+      if (d?.code === 'sold_at_source') { setSoldOut(true); refresh(); }
+      else if (d?.code === 'changed') getQuote(country);
+      setErr(er.message);
+    } finally { setBusy(false); }
+  };
+
+  const fee = quote ? quote.shipping_usd + quote.insurance_usd : 0;
+  const up = quote ? Math.max(0, quote.delta_usd) : 0;
+  const down = quote ? Math.max(0, -quote.delta_usd) : 0;
+  const refundAll = quote != null && up > 0 && choice === 'refund';
+  const total = fee + up;
+
+  return (
+    <Overlay label={`Redeem ${specimen.name}`} title={<div className="sec mono"><span>Redeem</span><span>{specimen.id}</span></div>}>
+      {done ? done.redemption ? (
+        <>
+          <h3 className="dlg-h">Ordered. {specimen.name} is coming to you.</h3>
+          <p className="dlg-p">The NFT is burned and the escrow has paid for the rock. {done.redemption.dealer_name ? <>It ships from <b>{done.redemption.dealer_name}</b>, </> : 'The dealer ships it, '}ordered within 48 hours. Tracking arrives by email and shows in your account under Shipments.</p>
+          {down > 0 && <p className="ok">The dealer’s price went down: {usd(down)} is on its way back to you in USDC.</p>}
+          {done.payment && <TxLine tx={done.payment.tx} simulated={done.payment.simulated} label="Paid" />}
+          <div className="acts"><a className="btn" href="/account#shipments">See shipments</a></div>
+        </>
+      ) : (
+        <>
+          <h3 className="dlg-h">Refunded in full.</h3>
+          <p className="dlg-p">{usd(done.refunded_usd ?? 0)}, everything you paid, is on its way in USDC. The NFT is burned.</p>
+          <div className="acts"><a className="btn" href="/account">Back to my account</a></div>
+        </>
+      ) : soldOut ? (
+        <>
+          <h3 className="dlg-h">The dealer sold this specimen.</h3>
+          <p className="dlg-p">It sold at its source before your redemption. Nothing was charged. Open it from your account to pick a replacement at the same or lower price (the difference comes back) or take a full refund of {usd(reservation.paid_usd)}.</p>
+          <div className="acts"><a className="btn" href="/account">Choose in my account</a></div>
+        </>
+      ) : (
+        <form className="fm" onSubmit={submit}>
+          <h3 className="dlg-h">Ship {specimen.name} to you.</h3>
+          <p className="dlg-p">Choose where it goes first: you’ll see the shipping cost and the dealer’s current price before anything is charged.</p>
+          <AddressFields countries={countries} country={country} onCountry={getQuote} />
+          {quoting && <p className="fine"><Spinner label="Checking" /> Checking shipping and the dealer’s price…</p>}
+          {quote && (
+            <>
+              <dl className="kv">
+                <dt>Insured shipping to {regionName(quote.country)}</dt><dd>{usd(quote.shipping_usd)}</dd>
+                <dt>Insurance</dt><dd>{usd(quote.insurance_usd)}</dd>
+                <dt>Rock price when you reserved</dt><dd>{usd(quote.reserved_price_usd)}</dd>
+                <dt>Dealer’s price now</dt><dd>{usd(quote.current_price_usd)}</dd>
+                {down > 0 && <><dt>Comes back to you</dt><dd className="ok-t">{usd(down)}</dd></>}
+                {up > 0 && <><dt>Difference to pay</dt><dd>{usd(up)}</dd></>}
+                <dt>{refundAll ? 'Refunded to you' : 'You pay now'}</dt><dd className="hot">{refundAll ? usd(reservation.paid_usd) : usd(total)}</dd>
+              </dl>
+              {up > 0 && (
+                <div className="pchoice" role="radiogroup" aria-label="The dealer’s price went up">
+                  <p className="fine">The dealer’s price went up by {usd(up)} since you reserved.</p>
+                  <label><input type="radio" name="price_change_ui" checked={choice === 'accept'} onChange={() => setChoice('accept')} /> Pay the {usd(up)} difference and ship it</label>
+                  <label><input type="radio" name="price_change_ui" checked={choice === 'refund'} onChange={() => setChoice('refund')} /> Cancel and get everything back ({usd(reservation.paid_usd)})</label>
+                </div>
+              )}
+            </>
+          )}
+          {err && <p className="err" role="alert">{err}</p>}
+          <button className="btn wide" type="submit" disabled={busy || !quote || quoting}>{busy ? <><Spinner label="Working" />Working…</> : !quote ? 'Choose a country to see the cost' : refundAll ? `Refund ${usd(reservation.paid_usd)}` : `Burn and ship for ${usd(total)}`}</button>
+          <p className="fine">The rock is bought from the dealer with the escrow only after the NFT is burned, and ordered within 48 hours. Only countries we can ship to are listed. Payments on this preview are simulated.</p>
         </form>
       )}
     </Overlay>
@@ -112,7 +234,7 @@ export function ShareDialog({ reveal }: { reveal: PackReveal }) {
       x.fillStyle = '#EFE6DA'; x.font = 'italic 400 52px "Instrument Serif", serif';
       x.fillText(line + '.', 66, 520, 620);
       x.fillStyle = '#A39484'; x.font = '400 18px "IBM Plex Mono", monospace';
-      x.fillText('CERTIFIED · VAULTED · MINTED ON SOLANA', 70, 572);
+      x.fillText('CERTIFIED · DOCUMENTED · MINTED ON SOLANA', 70, 572);
       const data = c.toDataURL('image/png');
       setUrl(data);
       c.toBlob(b => alive && setBlob(b), 'image/png');
@@ -122,7 +244,7 @@ export function ShareDialog({ reveal }: { reveal: PackReveal }) {
     return () => { alive = false; };
   }, [sp, reveal.band, line, me]);
 
-  const text = `${line}: ${sp.name}, ${sp.class}, ${mass(sp.mass_g)}. Real, certified, vaulted.`;
+  const text = `${line}: ${sp.name}, ${sp.class}, ${mass(sp.mass_g)}. Real, certified, minted on Solana.`;
   const shareUrl = typeof location !== 'undefined' ? `${location.origin}/s/${sp.id}` : '';
   const fileName = `space-rocks-${sp.id}.png`;
   const file = () => (blob ? new File([blob], fileName, { type: 'image/png' }) : null);
@@ -160,54 +282,119 @@ export function ShareDialog({ reveal }: { reveal: PackReveal }) {
 
 /* ---------- a specimen in your collection ---------- */
 
-const VIA: Record<Holding['acquired_via'], string> = { market: 'Bought on the market', pack: 'Pulled from a pack', raffle: 'Won in a launch drop raffle', secondary: 'Bought from a collector' };
+const VIA: Record<Holding['acquired_via'], string> = { market: 'Reserved on the market', pack: 'Pulled from a pack', raffle: 'Won in a launch drop raffle', secondary: 'Bought from a collector' };
+
+function SasThumb({ s }: { s: Specimen }) {
+  const img = useStill(s.render, { w: 112, h: 112, rot: -2, scale: 1.45 }, s.photo);
+  return <img className="sas-ph" src={img} alt="" width={56} height={56} />;
+}
+
+/** Sold at source: pick a replacement at the same or lower price, or take everything back. */
+function SoldAtSource({ h, r }: { h: Holding; r: Reservation }) {
+  const { data, refresh, toast, close } = useApp();
+  const [opts, setOpts] = useState<Specimen[] | null>(null);
+  const [pick, setPick] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    api<Specimen[]>('GET', `/api/reservations/${r.id}/replacements`).then(setOpts).catch(e => { setOpts([]); setErr(e.message); });
+  }, [r.id]);
+  const replace = async () => {
+    setBusy(true); setErr('');
+    try {
+      const x = await api<{ refunded_usd: number }>('POST', `/api/reservations/${r.id}/replace`, { specimen_id: pick });
+      await refresh(); toast(x.refunded_usd > 0 ? `Replacement reserved, ${usd(x.refunded_usd)} back` : 'Replacement reserved'); close();
+    } catch (e: any) { setErr(e.message); setBusy(false); }
+  };
+  const refund = async () => {
+    setBusy(true); setErr('');
+    try { const x = await api<{ refunded_usd: number }>('POST', `/api/reservations/${r.id}/refund`, {}); await refresh(); toast(`Refunded ${usd(x.refunded_usd)}`); close(); } catch (e: any) { setErr(e.message); setBusy(false); }
+  };
+  return (
+    <div className="sas">
+      <p className="err">The dealer sold {h.name} at its source. Choose a replacement at the same or lower price (the difference comes back to you), or take a full refund of {usd(r.paid_usd)}.</p>
+      {opts == null ? <p className="fine"><Spinner label="Loading" /> Finding replacements…</p> : opts.length ? (
+        <div className="sas-list" role="radiogroup" aria-label="Replacements">
+          {opts.map(o => {
+            const price = marketPriceOf(o, data.rules);
+            return (
+              <button key={o.id} type="button" role="radio" aria-checked={pick === o.id} className={'sas-o' + (pick === o.id ? ' on' : '')} onClick={() => setPick(o.id)}>
+                <SasThumb s={o} />
+                <span className="sas-t"><b>{o.name}</b><span className="mono">{o.class} · {mass(o.mass_g)}</span></span>
+                <span className="sas-p mono">{usd(price)}{r.paid_usd - price > 0.004 && <em>{usd(r.paid_usd - price)} back</em>}</span>
+              </button>
+            );
+          })}
+        </div>
+      ) : <p className="fine">No specimen at your price is available right now. You can take the full refund, or come back later.</p>}
+      {err && <p className="err" role="alert">{err}</p>}
+      <div className="acts">
+        {opts && opts.length > 0 && <button className="btn" type="button" disabled={!pick || busy} onClick={replace}>{busy ? <><Spinner label="Working" />Working…</> : 'Take this one instead'}</button>}
+        <button className="btn line" type="button" disabled={busy} onClick={refund}>Full refund · {usd(r.paid_usd)}</button>
+      </div>
+    </div>
+  );
+}
 
 export function ItemDialog({ holding: h }: { holding: Holding }) {
   const { data, me, open, refresh, toast, close } = useApp();
   const [busy, setBusy] = useState(false);
   const done = h.file_done ?? [];
   const linked = me?.profile.linked_wallet;
+  const r = liveReservation(h.reservation);
   const withdraw = async () => {
     setBusy(true);
     try { await api('POST', `/api/specimens/${h.id}/withdraw`, {}); await refresh(); toast('Sending the NFT to your wallet'); } catch (e: any) { toast(e.message, 'err'); } finally { setBusy(false); }
   };
-  const vault = h.vault_value_usd ?? 0;
+  const value = h.reservation ? h.reservation.escrow_usd || h.reservation.reserved_price_usd : h.vault_value_usd ?? 0;
   const shipping = h.status.kind === 'redeeming';
   const unlist = async () => {
     if (!h.listing) return;
     setBusy(true);
     try { await api('POST', `/api/listings/${h.listing.id}/cancel`, {}); await refresh(); toast('Taken off sale'); close(); } catch (e: any) { toast(e.message, 'err'); } finally { setBusy(false); }
   };
+  const reveal = holdingReveal(h);
   return (
     <Overlay wide label={h.name} title={<div className="sec mono"><span>Your collection</span><span>{h.id}</span></div>}>
       <div className="co">
-        <div className="co-media"><Media hint={h.render} photos={h.photos} label={h.name} className="co-ph" />{h.band && <span className={'chip' + (h.band !== 'hit' ? ' ' + h.band : '')}>{BAND_NAME[h.band].toUpperCase()}</span>}</div>
+        <div className="co-media"><Media hint={h.render} photos={h.photos} label={h.name} className="co-ph" />{r ? <span className={'chip' + (r.status === 'sold_at_source' ? ' floor' : '')}>{r.status === 'sold_at_source' ? 'SOLD AT SOURCE' : 'RESERVED'}</span> : h.band && <span className={'chip' + (h.band !== 'hit' ? ' ' + h.band : '')}>{BAND_NAME[h.band].toUpperCase()}</span>}</div>
         <div className="co-bd">
+          <Rarity type={h.render.type} price={value} />
           <h3>{h.name}</h3>
           <div className="cl mono">{h.class} · {mass(h.mass_g)} · {originLabel(h)}</div>
           <dl className="kv">
             <dt>{VIA[h.acquired_via]}</dt><dd>{new Date(h.acquired_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</dd>
             {h.paid_usd != null && <><dt>You paid</dt><dd>{h.paid_usd ? usd(h.paid_usd) : 'Free'}</dd></>}
-            <dt>Vault value</dt><dd>{usd(vault)}</dd>
-            <dt>Instant offer, {pct(data.rules.buyback_share)}%</dt><dd className="hot">{usd(buyback(vault, data.rules))}</dd>
+            {shipping ? <>
+              <dt>Rock price</dt><dd>{usd(value)}</dd>
+            </> : r ? <>
+              <dt>Rock price, held in escrow</dt><dd>{usd(value)}</dd>
+              <dt>{r.status === 'sold_at_source' ? 'Full refund available' : 'If you cancel'}</dt><dd className="hot">{usd(r.status === 'sold_at_source' ? r.paid_usd : value)}{r.status === 'sold_at_source' ? '' : ' back'}</dd>
+            </> : <>
+              <dt>Rock value</dt><dd>{usd(value)}</dd>
+              <dt>Instant offer, {pct(data.rules.buyback_share)}%</dt><dd className="hot">{usd(buyback(value, data.rules))}</dd>
+            </>}
             {h.listing && <><dt>Listed for collectors</dt><dd>{usd(h.listing.price_usd)}</dd></>}
           </dl>
           <ul className="chk cols">
             {FILE_ITEMS.map((f, i) => <li key={f.key} className={done[i] ? 'y' : ''}>{f.label}</li>)}
           </ul>
+          {r && !shipping && r.status === 'active' && <p className="fine src-line">Reserved for you. Sourced from an independent certified dealer, purchased and shipped when you redeem.</p>}
           <NftLine specimenId={h.id} />
           {!shipping && linked && h.mint_status === 'minted' && h.nft_owner !== linked && <button type="button" className="lnk" disabled={busy} onClick={withdraw}>Send the NFT to my wallet {linked.slice(0, 4)}…{linked.slice(-4)}</button>}
-          {shipping ? <p className="ok">On its way to you. Tracking is under Shipments.</p> : h.listing ? (
+          {shipping ? <p className="ok">On its way to you. Tracking is under Shipments.</p> : r?.status === 'sold_at_source' ? <SoldAtSource h={h} r={r} /> : h.listing ? (
             <div className="acts">
               <button className="btn line" type="button" disabled={busy} onClick={unlist}>{busy ? <><Spinner label="Working" />Working…</> : 'Take off sale'}</button>
-              <button className="btn line" type="button" onClick={() => open({ kind: 'share', reveal: holdingReveal(h) })}>Share</button>
+              <button className="btn line" type="button" onClick={() => open({ kind: 'share', reveal })}>Share</button>
             </div>
           ) : (
             <div className="acts">
               <button className="btn" type="button" onClick={() => open({ kind: 'list', holding: h })}>Sell to collectors</button>
-              <button className="btn line" type="button" onClick={() => open({ kind: 'reveal', reveal: holdingReveal(h), via: 'holding' })}>Sell back · {usd(buyback(vault, data.rules))}</button>
-              <button className="btn line" type="button" onClick={() => open({ kind: 'redeem', specimen: h })}>Redeem</button>
-              <button className="btn line" type="button" onClick={() => open({ kind: 'share', reveal: holdingReveal(h) })}>Share</button>
+              {r
+                ? <button className="btn line" type="button" onClick={() => open({ kind: 'reveal', reveal, via: 'holding', reservation: r, confirm: true })}>Cancel · {usd(value)} back</button>
+                : <button className="btn line" type="button" onClick={() => open({ kind: 'reveal', reveal, via: 'holding', confirm: true })}>Sell back · {usd(buyback(value, data.rules))}</button>}
+              <button className="btn line" type="button" onClick={() => open({ kind: 'redeem', specimen: h, reservation: r })}>Redeem</button>
+              <button className="btn line" type="button" onClick={() => open({ kind: 'share', reveal })}>Share</button>
             </div>
           )}
         </div>
@@ -220,8 +407,9 @@ export function ItemDialog({ holding: h }: { holding: Holding }) {
 
 export function ListDialog({ holding: h }: { holding: Holding }) {
   const { data, refresh, toast, close } = useApp();
-  const vault = h.vault_value_usd ?? 0;
-  const ref = vault ? marketPrice(vault, data.rules) : 0;
+  const r = liveReservation(h.reservation);
+  const value = r ? r.escrow_usd || r.reserved_price_usd : h.vault_value_usd ?? 0;
+  const ref = r ? marketPriceOf(h, data.rules) : value ? marketPrice(value, data.rules) : 0;
   const [price, setPrice] = useState(ref ? String(ref) : '');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -236,13 +424,13 @@ export function ListDialog({ holding: h }: { holding: Holding }) {
     <Overlay label={`Sell ${h.name}`} title={<div className="sec mono"><span>Sell to collectors</span><span>{h.id}</span></div>}>
       <form className="fm" onSubmit={submit}>
         <h3 className="dlg-h">Set your price for {h.name}.</h3>
-        <p className="dlg-p">It shows on the market under “From collectors”. Whoever buys it gets the NFT and the rock’s place in the vault. You can take it off sale any time before that.</p>
+        <p className="dlg-p">It shows on the market under “From collectors”. Whoever buys it gets the NFT{r ? ' and your reservation with its escrow' : ''}. You can take it off sale any time before that.</p>
         <label>Your price, USD<input type="number" min={1} step="0.01" value={price} onChange={e => setPrice(e.target.value)} required data-autofocus /></label>
         <div className="refs">
           <button type="button" onClick={() => setPrice(String(ref))}>Market price <b>{usd(ref)}</b></button>
-          <button type="button" onClick={() => setPrice(String(vault))}>Vault value <b>{usd(vault)}</b></button>
+          <button type="button" onClick={() => setPrice(String(value))}>Rock {r ? 'price' : 'value'} <b>{usd(value)}</b></button>
         </div>
-        <dl className="kv"><dt>Royalty to the vault, {pct(data.rules.royalty)}%</dt><dd>{usd(fee)}</dd><dt>You receive, in USDC</dt><dd className="hot">{usd(Math.max(0, p - fee))}</dd><dt>Or sell back now for</dt><dd>{usd(buyback(vault, data.rules))}</dd></dl>
+        <dl className="kv"><dt>Royalty to the platform, {pct(data.rules.royalty)}%</dt><dd>{usd(fee)}</dd><dt>You receive, in USDC</dt><dd className="hot">{usd(Math.max(0, p - fee))}</dd>{r ? <><dt>Or cancel now for</dt><dd>{usd(value)}</dd></> : <><dt>Or sell back now for</dt><dd>{usd(buyback(value, data.rules))}</dd></>}</dl>
         {err && <p className="err" role="alert">{err}</p>}
         <button className="btn wide" type="submit" disabled={busy || p < 1}>{busy ? <><Spinner label="Listing" />Listing…</> : `List for ${usd(p)}`}</button>
       </form>

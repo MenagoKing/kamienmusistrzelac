@@ -256,3 +256,15 @@ i.b-floor{background:#7D7166}i.b-par{background:#D6CABC}i.b-hit{background:#F08A
 .pacts button:disabled{opacity:.3}.pacts .del{color:var(--red)}
 .pdrop{display:flex;align-items:center;gap:10px;flex-wrap:wrap;color:var(--mute);font-size:13.5px}
 .pdrop span{flex:1;min-width:200px}
+
+/* Addendum 1: dealers, escrow, dealer orders */
+.steps-a{margin:0;padding-left:20px;display:grid;gap:10px;color:var(--soft)}.steps-a b{color:var(--ink)}
+.csvbox{width:100%;min-height:200px;font-size:12px;line-height:1.5;padding:12px;border-radius:12px;border:1px solid var(--line);background:rgba(255,255,255,.02);color:var(--ink);resize:vertical}
+.row-a{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.a-err ul{margin:6px 0 0;padding-left:18px}.a-err:has(ul){display:block}
+.src-row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:12px 0 4px;padding:10px 12px;border:1px solid var(--line);border-radius:12px}
+.dealer-card{border:1px solid rgba(190,150,230,.35);background:rgba(190,150,230,.05);border-radius:14px;padding:14px 16px;margin:14px 0;display:grid;gap:12px}
+.dealer-card>div:first-child{display:grid;gap:2px}.dealer-card>div:first-child b{font-size:18px}
+.dealer-card.late{border-color:rgba(242,160,138,.5);background:rgba(227,105,58,.06)}
+.late-t{color:var(--red)}
+.badge.red{color:var(--red)}

@@ -1,6 +1,6 @@
 // Read side: settings, row mappers and the public queries the site uses.
 import type {
-  Band, DropEvent, Holding, LaunchDrop, Listing, LockedSpecimen, PackReveal, PageData, Redemption, RockType, Rules,
+  Band, DropEvent, Holding, LaunchDrop, Listing, Reservation, LockedSpecimen, PackReveal, PageData, Redemption, RockType, Rules,
   Series, SeriesProof, Specimen, SpecimenAdmin, SpecimenFile, SpecimenState, SpecimenStatus, Tier, UpcomingSeries,
 } from '../shared/types.ts';
 import { FILE_ITEMS } from '../shared/types.ts';
@@ -31,7 +31,8 @@ export interface SpecimenRow {
   id: string; name: string; class: string; category: RockType; mass_g: number; origin: string | null; fall: string | null;
   vault_value_usd: number | null; state: SpecimenState; series_id: string | null; drop_id: string | null; sold_back: number;
   owner: string | null; mint: string | null; vault_id: string | null; file: string; notes: string; render_seed: number;
-  featured: number; mint_status: string; mint_tx: string | null; nft_owner: string | null; acquired_via: string | null; acquired_at: string | null; paid_usd: number | null; created_at: string; updated_at: string;
+  featured: number; mint_status: string; mint_tx: string | null; nft_owner: string | null; acquired_via: string | null;
+  dealer_id: string | null; dealer_price_usd: number | null; dealer_sku: string; dealer_url: string; source_status: string; source_verified_at: string | null; acquired_at: string | null; paid_usd: number | null; created_at: string; updated_at: string;
 }
 
 export const parseFall = (f: string | null): number | 'find' | null => (f == null || f === '' ? null : f === 'find' ? 'find' : Number(f));
@@ -84,8 +85,19 @@ export function toPublic(r: SpecimenRow): Specimen {
     file_done: [...FILE_ITEMS.map(i => present(f[i.key])), !!r.mint],
     photo: photoOf(r), photos: (fileOf(r).photos ?? []).filter(isImage), mint: r.mint, mint_status: r.mint_status, nft_owner: r.nft_owner, owner: displayName(r.owner),
     listing: l ? { id: l.id, price_usd: l.price_usd } : null,
+    sourced: !!r.dealer_id,
+    source_price_usd: r.dealer_id ? r.dealer_price_usd ?? r.vault_value_usd : null,
+    source_available: r.dealer_id ? r.source_status === 'available' : true,
     render: { type: r.category, seed: r.render_seed },
   };
+}
+
+/** The open reservation on a specimen, with its escrow (holder view). */
+export function reservationView(specimenId: string): Reservation | null {
+  const r = get<any>(`SELECT r.*, e.amount_usd escrow_usd, e.status escrow_status FROM reservations r LEFT JOIN escrows e ON e.reservation_id = r.id
+    WHERE r.specimen_id = ? AND r.status IN ('active', 'sold_at_source', 'redeeming') ORDER BY r.created_at DESC LIMIT 1`, specimenId);
+  if (!r) return null;
+  return { id: r.id, status: r.status, reserved_price_usd: r.reserved_price_usd, commission_usd: r.commission_usd, paid_usd: r.paid_usd, currency: r.currency, escrow_usd: r.escrow_usd ?? 0, escrow_status: r.escrow_status ?? 'released', created_at: r.created_at };
 }
 
 export function toAdmin(r: SpecimenRow): SpecimenAdmin & { file_complete: boolean; photo: string | null } {
@@ -94,6 +106,7 @@ export function toAdmin(r: SpecimenRow): SpecimenAdmin & { file_complete: boolea
     vault_value_usd: r.vault_value_usd, state: r.state, series_id: r.series_id, drop_id: r.drop_id, sold_back: !!r.sold_back,
     owner: r.owner, mint: r.mint, vault_id: r.vault_id, file: fileOf(r), notes: r.notes, render_seed: r.render_seed,
     created_at: r.created_at, updated_at: r.updated_at, featured: r.featured, file_complete: fileComplete(r), photo: photoOf(r),
+    dealer_id: r.dealer_id, dealer_price_usd: r.dealer_price_usd, dealer_sku: r.dealer_sku, dealer_url: r.dealer_url, source_status: r.source_status, source_verified_at: r.source_verified_at,
   };
 }
 
@@ -198,13 +211,15 @@ export function holdingsOf(wallet: string): Holding[] {
   const rows = all<SpecimenRow>("SELECT * FROM specimens WHERE owner = ? AND state IN ('held', 'redeeming') ORDER BY acquired_at DESC", wallet);
   return rows.map(r => {
     const pull = get<{ band: Band }>('SELECT band FROM pulls WHERE specimen_id = ? AND wallet = ? ORDER BY created_at DESC LIMIT 1', r.id, wallet);
-    return { ...toPublic(r), acquired_via: (r.acquired_via ?? 'market') as Holding['acquired_via'], acquired_at: r.acquired_at ?? r.updated_at, paid_usd: r.paid_usd, band: r.acquired_via === 'pack' || r.acquired_via === 'raffle' ? pull?.band ?? null : null };
+    return { ...toPublic(r), acquired_via: (r.acquired_via ?? 'market') as Holding['acquired_via'], acquired_at: r.acquired_at ?? r.updated_at, paid_usd: r.paid_usd, band: r.acquired_via === 'pack' || r.acquired_via === 'raffle' ? pull?.band ?? null : null, reservation: r.dealer_id ? reservationView(r.id) : null };
   });
 }
 
 export function redemptionOf(r: any): Redemption {
   const s = specimenRow(r.specimen_id);
-  return { ...r, specimen_name: s?.name ?? r.specimen_id, address: JSON.parse(r.address) };
+  // The dealer is named to the holder only now, after redemption.
+  const dealer = r.dealer_id ? get<{ name: string }>('SELECT name FROM dealers WHERE id = ?', r.dealer_id) : undefined;
+  return { ...r, specimen_name: s?.name ?? r.specimen_id, address: JSON.parse(r.address), dealer_name: dealer?.name ?? null };
 }
 
 
@@ -243,7 +258,14 @@ export function pageData(): PageData {
     redeemed: get<{ n: number }>("SELECT COUNT(*) n FROM specimens WHERE state = 'redeemed'")!.n,
   };
   const live = open.find(s => s.status === 'open') ?? open[0] ?? null;
-  return { chain: { cluster: process.env.CHAIN === 'simulated' ? 'simulated' : process.env.SOLANA_CLUSTER || 'devnet' }, listings: publicListings(), rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
+  return { token: tokenView(rules), chain: { cluster: process.env.CHAIN === 'simulated' ? 'simulated' : process.env.SOLANA_CLUSTER || 'devnet' }, listings: publicListings(), rules, market, register, register_total, series: live, open_series: [...open.filter(s => s.status === 'open'), ...dropSeries], upcoming, reveal: hit ? toReveal(hit) : SAMPLE_REVEAL, drop: currentDrop(), stats };
+}
+
+/** Token payment info for the page; the live price comes from server/token.ts. */
+function tokenView(rules: Rules) {
+  const g = globalThis as unknown as { __srtokprice?: () => number | null };
+  const price = g.__srtokprice ? g.__srtokprice() : null;
+  return { enabled: rules.token_enabled && price != null, symbol: rules.token_symbol, discount: rules.token_discount, price_usd: price };
 }
 
 export function vaultRegister(q = '', state = ''): Specimen[] {

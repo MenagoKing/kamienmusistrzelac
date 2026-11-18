@@ -86,12 +86,15 @@ export function Stat({ label, value, hint, tone }: { label: string; value: React
 const TONE: Record<string, string> = {
   draft: 'mute', vault: 'blue', market: 'green', series: 'blue', locked: 'violet', held: 'amber', redeeming: 'grey', redeemed: 'grey',
   open: 'green', upcoming: 'amber', sold_out: 'grey', closed: 'grey', scheduled: 'amber',
-  requested: 'amber', packing: 'blue', shipped: 'green', delivered: 'grey', cancelled: 'mute',
+  requested: 'amber', ordered: 'violet', packing: 'blue', shipped: 'green', delivered: 'grey', cancelled: 'mute',
+  reservation: 'green', reservation_cancel: 'amber', reservation_refund: 'mute', replacement_refund: 'mute', price_difference_refund: 'mute', price_difference_topup: 'blue', escrow_release: 'violet',
+  sold_at_source: 'red', replaced: 'grey', refunded: 'mute',
+  esc_locked: 'amber', esc_released: 'violet', esc_refunded: 'mute', esc_lock: 'amber', esc_refund: 'mute', esc_topup: 'blue', esc_move: 'grey', esc_release: 'violet', dealer: 'violet', own: 'grey',
   pack: 'green', market_buy: 'green', secondary_sale: 'violet', seller_payout: 'amber', buyback: 'amber', active: 'green', sold: 'grey', account: 'blue', redemption_fee: 'blue', redemption_refund: 'mute', raffle: 'violet',
   floor: 'floor', par: 'par', hit: 'hit', unlocked: 'green', raffled: 'violet', rolled: 'amber', carried: 'mute',
   sample: 'mute', demo: 'mute', phantom: 'violet', solflare: 'amber', backpack: 'blue', wallet: 'grey',
 };
-const LABEL: Record<string, string> = { sold_out: 'sold out', market_buy: 'market', secondary_sale: 'collector sale', seller_payout: 'seller payout', redemption_fee: 'redeem fee', redemption_refund: 'refund', vault: 'in vault', series: 'in series' };
+const LABEL: Record<string, string> = { reservation: 'reserved', reservation_cancel: 'cancel refund', reservation_refund: 'full refund', replacement_refund: 'replacement', price_difference_refund: 'price drop back', price_difference_topup: 'price top-up', escrow_release: 'escrow released', sold_at_source: 'sold at source', held: 'reserved / held', sold_out: 'sold out', market_buy: 'market', secondary_sale: 'collector sale', seller_payout: 'seller payout', redemption_fee: 'redeem fee', redemption_refund: 'refund', vault: 'in vault', series: 'in series' };
 
 export function Badge({ v, children }: { v: string; children?: ReactNode }) {
   return <span className={'badge ' + (TONE[v] ?? 'grey')}>{children ?? LABEL[v] ?? v.replace(/_/g, ' ')}</span>;

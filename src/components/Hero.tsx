@@ -84,14 +84,14 @@ export function Hero() {
       </nav>
       <div className="coords mono wrap"><b>29.48° N  7.61° W</b><span>Earth</span><span>Tissint, a Martian fall</span><span>18 July 2011</span></div>
       <div className="lead wrap">
-        <h1><span><i>Own a piece</i></span><span><i>of another</i></span><span><i>world.</i></span></h1>
-        <p>Buy a real meteorite at a fixed price, or open a sealed pack with a guaranteed floor. Every specimen is certified, weighed on camera, sealed in our vault and minted to your wallet on Solana.</p>
+        <h1><span><i>Hold a piece</i></span><span><i>of another</i></span><span><i>world.</i></span></h1>
+        <p>Reserve a real meteorite at a fixed price, or open a sealed pack with a guaranteed floor. Sourced from independent certified dealers, purchased and shipped when you redeem. Every specimen is certified and minted to your wallet on Solana.</p>
         <div className="cta"><a className="btn" href="#packs">Open a pack</a><a className="ghost" href="#market">See the market</a></div>
       </div>
       <div className="spec mono"><b>Shergottite · Martian</b>Tissint, end cut</div>
       <div className="stats">
         <div><b>0</b><span>randomness in the market: you pick the rock</span></div>
-        <div><b>70%</b><span>floor: no pack is worth less in vault value</span></div>
+        <div><b>70%</b><span>floor: no pack is worth less in rock value</span></div>
         <div><b>100</b><span>packs per sealed series, contents published first</span></div>
       </div>
     </section>

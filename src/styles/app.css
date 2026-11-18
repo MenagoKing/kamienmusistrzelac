@@ -165,3 +165,27 @@ html.locked{overflow:hidden}
   .hdr .wbtn{margin-left:auto}
   .ptab th:nth-child(2),.ptab td:nth-child(2){display:none}
 }
+
+/* ---------- Addendum 1: reservations, rarity, token ---------- */
+.rar{display:inline-flex;align-items:center;vertical-align:middle;margin:0 0 0 6px;padding:3px 7px;border-radius:999px;font:600 9.5px/1 'IBM Plex Mono',monospace;letter-spacing:.12em;text-transform:uppercase;border:1px solid var(--line);color:var(--mute);background:transparent;white-space:nowrap}
+.co-bd>.rar{margin:0 0 10px}
+.rar.uncommon{color:#BFE3BC;border-color:rgba(158,211,154,.4)}
+.rar.rare{color:#A9C4EC;border-color:rgba(140,170,220,.45)}
+.rar.epic{color:#D6B4F2;border-color:rgba(190,150,230,.5)}
+.rar.legendary{color:#1A0E08;background:linear-gradient(90deg,#F08A5D,#E8C27A);border-color:transparent}
+.pay.three{grid-template-columns:1fr 1fr 1fr}
+.pay button .save{font:500 10px/1 'IBM Plex Mono',monospace;font-style:normal;color:#BFE3BC;letter-spacing:.06em}
+.src-line{border-left:2px solid var(--line);padding-left:10px;margin-top:12px}
+.kv dd.ok-t{color:#BFE3BC}
+.pchoice{display:grid;gap:8px;margin:14px 0 0;padding:12px 14px;border:1px solid var(--line);border-radius:12px}
+.pchoice .fine{margin:0}
+.pchoice label{display:flex;gap:10px;align-items:flex-start;font-size:14px;color:var(--ink);cursor:pointer}
+.pchoice input{accent-color:#F08A5D;margin-top:3px}
+.sas{margin-top:14px}
+.sas-list{display:grid;gap:8px;max-height:320px;overflow:auto;margin-top:12px;padding-right:4px}
+.sas-o{display:grid;grid-template-columns:56px 1fr auto;gap:12px;align-items:center;padding:8px 10px;border-radius:12px;border:1px solid var(--line);background:transparent;color:var(--ink);cursor:pointer;text-align:left}
+.sas-o.on{border-color:var(--dust2);background:rgba(227,105,58,.07)}
+.sas-ph{width:56px;height:56px;border-radius:8px;overflow:hidden}
+.sas-t{display:grid;gap:3px;min-width:0}.sas-t b{font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.sas-t span{font-size:11px;color:var(--mute)}
+.sas-p{display:grid;gap:3px;justify-items:end;font-size:13px}.sas-p em{font-style:normal;font-size:10px;color:#BFE3BC}
+@media (max-width:520px){.pay.three{grid-template-columns:1fr}.pay.three button{flex-direction:row;align-items:center;justify-content:space-between}}

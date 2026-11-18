@@ -6,6 +6,7 @@ import { chain } from './chain.ts';
 import { all, get, now, run, tx } from './db.ts';
 import { ledger } from './ops.ts';
 import { nftOwnerOf, queueTransfer } from './nft.ts';
+import { moveReservation } from './sources.ts';
 import { activeListing, displayName, getRules, specimenRow, toListing, type ListingRow, type SpecimenRow } from './store.ts';
 import { cents, fail, num, uid } from './util.ts';
 
@@ -19,6 +20,7 @@ export function listForSale(address: string, specimenId: string, b: any): Listin
     const s = specimenRow(specimenId) ?? fail(404, 'Specimen not found');
     if (s.owner !== address || s.state !== 'held') fail(403, 'You do not hold this specimen');
     if (activeListing(specimenId)) fail(409, 'This specimen is already listed');
+    if (get<{ n: number }>("SELECT COUNT(*) n FROM reservations WHERE specimen_id = ? AND status = 'sold_at_source'", specimenId)!.n) fail(409, 'The dealer sold this specimen: choose a replacement or a refund first');
     const max = Math.max(1000, (s.vault_value_usd ?? 0) * 100);
     const price = cents(num(b?.price_usd, 'Price', 1, max));
     const id = uid('ls');
@@ -52,6 +54,7 @@ export function buyListing(buyer: string, id: string, currency: unknown): { list
     const payout = chain.payout({ to: l.seller, usd: payoutUsd, memo: `sale ${l.id}` });
     run("UPDATE specimens SET owner = ?, acquired_via = 'secondary', acquired_at = ?, paid_usd = ?, updated_at = ? WHERE id = ?", buyer, now(), l.price_usd, now(), s.id);
     queueTransfer(s.id, nftOwnerOf(buyer));
+    moveReservation(s.id, buyer); // the reservation and its escrow follow the NFT
     run("UPDATE listings SET status = 'sold', buyer = ?, closed_at = ? WHERE id = ?", buyer, now(), id);
     ledger('secondary_sale', { wallet: buyer, specimen_id: s.id, usd: l.price_usd, currency: payment.currency, amount: payment.amount, tx: payment.tx, split: { seller_payout: payoutUsd, royalty, listing: l.id } });
     ledger('seller_payout', { wallet: l.seller, specimen_id: s.id, usd: -payoutUsd, currency: 'USDC', amount: -payout.amount, tx: payout.tx, split: { listing: l.id, royalty } });

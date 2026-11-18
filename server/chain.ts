@@ -15,7 +15,7 @@ export interface ChargeResult { tx: string; currency: Currency; amount: number; 
 
 export interface Chain {
   readonly mode: 'simulated' | 'solana';
-  charge(p: { from: string; usd: number; currency: Currency; solUsd: number; memo: string }): ChargeResult;
+  charge(p: { from: string; usd: number; currency: Currency; solUsd: number; memo: string; tokenAmount?: number }): ChargeResult;
   payout(p: { to: string; usd: number; memo: string }): ChargeResult;
   mint(p: { owner: string; specimenId: string; name: string }): { mint: string; tx: string };
   burn(p: { mint: string; owner: string }): { tx: string };
@@ -23,8 +23,8 @@ export interface Chain {
 
 class SimulatedChain implements Chain {
   readonly mode = 'simulated' as const;
-  charge(p: { from: string; usd: number; currency: Currency; solUsd: number }): ChargeResult {
-    const amount = p.currency === 'SOL' ? Math.round((p.usd / p.solUsd) * 1e6) / 1e6 : cents(p.usd);
+  charge(p: { from: string; usd: number; currency: Currency; solUsd: number; tokenAmount?: number }): ChargeResult {
+    const amount = p.currency === 'SOL' ? Math.round((p.usd / p.solUsd) * 1e6) / 1e6 : p.currency === 'TOKEN' ? p.tokenAmount ?? 0 : cents(p.usd);
     return { tx: randomB58(64), currency: p.currency, amount, usd: cents(p.usd), simulated: true };
   }
   payout(p: { usd: number }): ChargeResult {

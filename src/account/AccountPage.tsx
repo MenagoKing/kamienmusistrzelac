@@ -1,12 +1,13 @@
-// /account: the collector's own space. Profile with level and rank, the collection (sell, sell back,
-// redeem, share), listings, achievements, activity, shipments and settings.
+// /account: the collector's own space. Profile with level and rank, the collection (sell, cancel or
+// sell back, redeem, share), listings, achievements, activity, shipments and settings.
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import type { Holding, PageData, RockType } from '../data';
 import { api } from '../lib/api';
 import { AppProvider, callsign, useApp } from '../lib/store';
 import { useStill } from '../lib/stills';
 import { WALLETS, signOut, type WalletId } from '../lib/wallet';
-import { mass, usd } from '../lib/format';
+import { liveReservation, mass, usd } from '../lib/format';
+import { Rarity } from '../components/Checkout';
 import { BAND_NAME, shortAddr } from '../../shared/rules.ts';
 import { Header } from '../components/Header';
 import { Footer } from '../components/Closing';
@@ -14,6 +15,9 @@ import { Spinner, Toasts } from '../components/Overlay';
 import { DialogHost } from '../components/Dialogs';
 import { AvatarTurn, ROCK_LABEL } from '../components/Avatar';
 import { RockView } from '../components/RockView';
+
+/** What a holding is worth to its holder: the escrowed rock price for reservations, else the rock value. */
+const valueOf = (h: Holding) => (h.reservation ? h.reservation.escrow_usd || h.reservation.reserved_price_usd : h.vault_value_usd);
 
 type Tab = 'collection' | 'selling' | 'achievements' | 'activity' | 'shipments' | 'settings';
 const TABS: [Tab, string][] = [['collection', 'Collection'], ['selling', 'For sale'], ['achievements', 'Achievements'], ['activity', 'Activity'], ['shipments', 'Shipments'], ['settings', 'Settings']];
@@ -34,7 +38,7 @@ function Banner() {
     <section className="acc-hero wrap">
       <AvatarTurn seed={p.avatar_seed} size={220} />
       <div className="acc-id">
-        <div className="sec mono"><span>Collector</span><span>{p.kind === 'account' ? 'Vault account' : p.kind === 'demo' ? 'Demo wallet' : 'Solana wallet'}</span></div>
+        <div className="sec mono"><span>Collector</span><span>{p.kind === 'account' ? 'Space Rocks account' : p.kind === 'demo' ? 'Demo wallet' : 'Solana wallet'}</span></div>
         <h1>{p.username ?? shortAddr(p.address)}</h1>
         {!p.username && <button type="button" className="lnk" onClick={() => { location.hash = 'settings'; }}>Pick a callsign →</button>}
         <div className="lvl">
@@ -57,7 +61,7 @@ function Banner() {
       <div className="acc-cta">
         <a className="btn" href="/#packs">Open a pack</a>
         <a className="btn line" href="/#market">Go to the market</a>
-        <button type="button" className="btn line" onClick={() => open({ kind: 'register' })}>The vault register</button>
+        <button type="button" className="btn line" onClick={() => open({ kind: 'register' })}>The specimen register</button>
       </div>
     </section>
   );
@@ -71,7 +75,7 @@ function Card({ h, i }: { h: Holding; i: number }) {
   return (
     <button ref={ref} type="button" className={'ccard ' + h.render.type} onClick={() => open({ kind: 'item', holding: h })}>
       <span className="ccard-ph"><RockView hint={h.render} mode="hover" startRot={-2 + (i % 7) * .2} hoverRef={ref as React.RefObject<HTMLElement>} label={`${h.name} in 3D`} />
-        {h.band && <em className={'cb ' + h.band}>{BAND_NAME[h.band]}</em>}
+        {liveReservation(h.reservation) ? <em className={'cb ' + (h.reservation!.status === 'sold_at_source' ? 'sas' : 'res')}>{h.reservation!.status === 'sold_at_source' ? 'Sold at source · choose' : 'Reserved'}</em> : h.band && <em className={'cb ' + h.band}>{BAND_NAME[h.band]}</em>}
         {h.listing && <em className="cb sale">For sale · {usd(h.listing.price_usd)}</em>}
         {h.status.kind === 'redeeming' && <em className="cb ship">Shipping</em>}
       </span>
@@ -79,7 +83,7 @@ function Card({ h, i }: { h: Holding; i: number }) {
         <span className="mono dim">{h.id} · {ROCK_LABEL[h.render.type]}</span>
         <b>{h.name}</b>
         <span className="mono dim">{h.class} · {mass(h.mass_g)}</span>
-        <span className="ccard-v"><span className="mono dim">Vault value</span><strong>{h.vault_value_usd != null ? usd(h.vault_value_usd) : '—'}</strong></span>
+        <span className="ccard-v"><span className="mono dim">{liveReservation(h.reservation) ? 'In escrow' : 'Rock value'} <Rarity type={h.render.type} price={valueOf(h)} /></span><strong>{valueOf(h) != null ? usd(valueOf(h)!) : '—'}</strong></span>
       </span>
     </button>
   );
@@ -93,7 +97,7 @@ function Collection() {
   const [sort, setSort] = useState<'new' | 'value' | 'rare'>('new');
   const list = useMemo(() => {
     const l = (me?.holdings ?? []).filter(h => !f || h.render.type === f);
-    if (sort === 'value') l.sort((a, b) => (b.vault_value_usd ?? 0) - (a.vault_value_usd ?? 0));
+    if (sort === 'value') l.sort((a, b) => (valueOf(b) ?? 0) - (valueOf(a) ?? 0));
     if (sort === 'rare') l.sort((a, b) => ORDER.indexOf(a.render.type) - ORDER.indexOf(b.render.type));
     return l;
   }, [me, f, sort]);
@@ -117,7 +121,7 @@ function Collection() {
       </div>
       {list.length ? <div className="cgrid">{list.map((h, i) => <Card key={h.id} h={h} i={i} />)}</div> : (
         <div className="cempty">
-          <p>{f ? `No ${ROCK_LABEL[f].toLowerCase()} in your collection yet.` : 'Your vault is empty. Every collection starts with one rock.'}</p>
+          <p>{f ? `No ${ROCK_LABEL[f].toLowerCase()} in your collection yet.` : 'Your collection is empty. Every collection starts with one rock.'}</p>
           <div className="acts"><a className="btn" href="/#packs">Open a pack</a><a className="btn line" href="/#market">Pick one on the market</a></div>
         </div>
       )}
@@ -141,7 +145,7 @@ function Selling() {
     setBusy(id);
     try { await api('POST', `/api/listings/${id}/cancel`, {}); await refresh(); toast('Taken off sale'); } catch (e: any) { toast(e.message, 'err'); } finally { setBusy(''); }
   };
-  const listable = me.holdings.filter(h => h.status.kind === 'held' && !h.listing);
+  const listable = me.holdings.filter(h => h.status.kind === 'held' && !h.listing && h.reservation?.status !== 'sold_at_source');
   return (
     <>
       {me.listings.length ? (
@@ -162,7 +166,7 @@ function Selling() {
       {listable.length > 0 && (
         <>
           <h3 className="acc-h">Put one up for sale</h3>
-          <div className="pickl">{listable.map(h => <button key={h.id} type="button" className="pk" onClick={() => open({ kind: 'list', holding: h })}><b>{h.name}</b><span className="mono dim">{h.id} · vault {h.vault_value_usd != null ? usd(h.vault_value_usd) : '—'}</span></button>)}</div>
+          <div className="pickl">{listable.map(h => <button key={h.id} type="button" className="pk" onClick={() => open({ kind: 'list', holding: h })}><b>{h.name}</b><span className="mono dim">{h.id} · {valueOf(h) != null ? usd(valueOf(h)!) : '—'}</span></button>)}</div>
         </>
       )}
     </>
@@ -190,7 +194,8 @@ function Achievements() {
   );
 }
 
-const ACT: Record<string, string> = { market_buy: 'Bought on the market', pack: 'Opened a pack', raffle: 'Won a drop raffle', secondary_sale: 'Bought from a collector', seller_payout: 'Sold to a collector', buyback: 'Sold back to the vault', redemption_fee: 'Redemption fee', redemption_refund: 'Redemption refunded' };
+const ACT: Record<string, string> = { market_buy: 'Bought on the market', reservation: 'Reserved on the market', reservation_cancel: 'Reservation cancelled, rock price back', reservation_refund: 'Refunded in full (sold at source)', replacement_refund: 'Replacement, difference back', price_difference_refund: 'Dealer price lower, difference back', price_difference_topup: 'Dealer price higher, difference paid', escrow_release: 'Escrow paid the dealer', pack: 'Opened a pack', raffle: 'Won a drop raffle', secondary_sale: 'Bought from a collector', seller_payout: 'Sold to a collector', buyback: 'Sold back', redemption_fee: 'Shipping and handling', redemption_refund: 'Redemption refunded' };
+const INCOMING = new Set(['seller_payout', 'buyback', 'redemption_refund', 'reservation_cancel', 'reservation_refund', 'replacement_refund', 'price_difference_refund']);
 
 function ActivityList() {
   const { me } = useApp();
@@ -198,7 +203,7 @@ function ActivityList() {
   if (!me.activity.length) return <p className="cempty-p">No activity yet.</p>;
   return (
     <ul className="plist">{me.activity.map(a => {
-      const incoming = a.kind === 'seller_payout' || a.kind === 'buyback' || a.kind === 'redemption_refund';
+      const incoming = INCOMING.has(a.kind);
       return (
         <li key={a.id}><span><b>{ACT[a.kind] ?? a.kind}</b><small className="mono">{a.specimen_name ?? ''}{a.specimen_id ? ` · ${a.specimen_id}` : ''} · {new Date(a.created_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</small></span><em className={'mono ' + (incoming ? 'in' : '')}>{incoming ? '+' : a.usd === 0 ? '' : '−'}{usd(Math.abs(a.usd))}</em></li>
       );
@@ -210,13 +215,13 @@ function Shipments() {
   const { me } = useApp();
   if (!me) return null;
   if (!me.redemptions.length) return <p className="cempty-p">No shipments. Redeem a specimen from your collection to get the rock itself.</p>;
-  const steps = ['requested', 'packing', 'shipped', 'delivered'];
+  const steps = ['requested', 'ordered', 'packing', 'shipped', 'delivered'];
   return (
     <ul className="ships">{me.redemptions.map(r => (
       <li key={r.id}>
-        <div className="sh-t"><b>{r.specimen_name}</b><span className="mono dim">{r.address.city}, {r.address.country}{r.tracking ? ` · tracking ${r.tracking}` : ''}</span></div>
+        <div className="sh-t"><b>{r.specimen_name}</b><span className="mono dim">{r.address.city}, {r.address.country}{r.dealer_name ? ` · ships from ${r.dealer_name}` : ''}{r.tracking ? ` · tracking ${r.tracking}` : r.kind === 'dealer' && r.status === 'requested' && r.due_at ? ` · ordered by ${new Date(r.due_at).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : ''}</span></div>
         {r.status === 'cancelled' ? <span className="st pend">Cancelled, fee refunded</span> : (
-          <ol className="steps">{steps.map((s, i) => <li key={s} className={steps.indexOf(r.status) >= i ? 'on' : ''}>{s}</li>)}</ol>
+          <ol className="steps">{(r.kind === 'dealer' ? steps : steps.filter(s => s !== 'ordered')).map((s, i, all) => <li key={s} className={all.indexOf(r.status) >= i ? 'on' : ''}>{s}</li>)}</ol>
         )}
       </li>
     ))}</ul>
@@ -296,7 +301,7 @@ function Settings() {
           </>
         ) : (
           <>
-            <p className="dlg-p">Your specimens are held in your vault account. Link a wallet to withdraw NFTs to it later.</p>
+            <p className="dlg-p">Your NFTs are held in your Space Rocks account. Link a wallet to withdraw them to it later.</p>
             <div className="wl tight">{WALLETS.map(w => w.detect() ? <button key={w.id} className="wrow" type="button" onClick={() => link(w.id)} disabled={busy === 'wallet'}><b>{w.name}</b><span className="mono">Link</span></button> : <a key={w.id} className="wrow off" href={w.url} target="_blank" rel="noreferrer"><b>{w.name}</b><span className="mono">Install ↗</span></a>)}</div>
           </>
         )}
@@ -333,7 +338,7 @@ function Page() {
           <section className="acc-gate wrap">
             <div className="sec mono"><span>Your account</span></div>
             <h1>Your collection lives here.</h1>
-            <p>Sign in to see your specimens, sell them to other collectors or back to the vault, follow your shipments and level up as you collect.</p>
+            <p>Sign in to see your specimens, sell them to other collectors, cancel or redeem, follow your shipments and level up as you collect.</p>
             <div className="acts">
               <button className="btn" type="button" onClick={() => open({ kind: 'auth', mode: 'register' })}>Create an account</button>
               <button className="btn line" type="button" onClick={() => open({ kind: 'auth', mode: 'login' })}>Sign in</button>

@@ -30,14 +30,17 @@ export function overview() {
     days.push({
       day: d,
       packs: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'pack' AND substr(created_at, 1, 10) = ?", d),
-      market: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'market_buy' AND substr(created_at, 1, 10) = ?", d),
+      market: sum("SELECT SUM(usd) s FROM ledger WHERE kind IN ('market_buy', 'reservation') AND substr(created_at, 1, 10) = ?", d),
       buyback: -sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'buyback' AND substr(created_at, 1, 10) = ?", d),
     });
   }
   return {
     revenue: {
       packs: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'pack'"),
-      market: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'market_buy'"),
+      market: sum("SELECT SUM(usd) s FROM ledger WHERE kind IN ('market_buy', 'reservation')"),
+      commission: sum("SELECT SUM(json_extract(split, '$.commission')) s FROM ledger WHERE kind = 'reservation'"),
+      commission_kept_on_cancel: sum("SELECT SUM(json_extract(split, '$.commission_kept')) s FROM ledger WHERE kind = 'reservation_cancel'"),
+      token_burn_reserved: sum("SELECT SUM(json_extract(split, '$.token_burn')) s FROM ledger WHERE kind = 'reservation'"),
       redemption_fees: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'redemption_fee'"),
       royalties: sum("SELECT SUM(usd) s FROM ledger WHERE kind IN ('secondary_sale', 'seller_payout')"),
       secondary_volume: sum("SELECT SUM(usd) s FROM ledger WHERE kind = 'secondary_sale'"),
@@ -48,8 +51,12 @@ export function overview() {
       specimens: n('SELECT COUNT(*) n FROM specimens'), by_state: byState,
       vault_value: sum("SELECT SUM(vault_value_usd) s FROM specimens WHERE state NOT IN ('redeemed')"),
       packs_opened: n('SELECT COUNT(*) n FROM pulls WHERE bonus = 0'), wallets: n('SELECT COUNT(*) n FROM wallets'),
-      waitlist: n('SELECT COUNT(*) n FROM waitlist'), redemptions_open: n("SELECT COUNT(*) n FROM redemptions WHERE status IN ('requested', 'packing')"),
+      waitlist: n('SELECT COUNT(*) n FROM waitlist'), redemptions_open: n("SELECT COUNT(*) n FROM redemptions WHERE status IN ('requested', 'ordered', 'packing')"),
       drafts: n("SELECT COUNT(*) n FROM specimens WHERE state = 'draft'"), sold_back_waiting: n("SELECT COUNT(*) n FROM specimens WHERE state = 'vault' AND sold_back = 1"),
+      escrow_locked: sum("SELECT SUM(amount_usd) s FROM escrows WHERE status = 'locked'"), reservations_active: n("SELECT COUNT(*) n FROM reservations WHERE status = 'active'"),
+      sold_at_source_waiting: n("SELECT COUNT(*) n FROM reservations WHERE status = 'sold_at_source'"),
+      dealer_orders_due: n("SELECT COUNT(*) n FROM redemptions WHERE kind = 'dealer' AND status = 'requested'"),
+      dealer_orders_overdue: n("SELECT COUNT(*) n FROM redemptions WHERE kind = 'dealer' AND status = 'requested' AND due_at < ?", new Date().toISOString()),
     },
     days,
     series: all<SeriesRow>("SELECT * FROM series WHERE status IN ('open', 'upcoming') ORDER BY sort, id").map(toSeries),
@@ -97,17 +104,29 @@ function readSpecimen(b: any) {
     vault_value_usd: b?.vault_value_usd == null || b?.vault_value_usd === '' ? null : num(b.vault_value_usd, 'Vault value', 0.01, 1e8),
     vault_id: optStr(b?.vault_id, 60) || null, notes: optStr(b?.notes, 4000), file: readFile(b?.file),
     render_seed: b?.render_seed == null || b?.render_seed === '' ? Math.floor(Math.random() * 1000) : Math.round(num(b.render_seed, 'Render seed', 0, 1e6)),
+    dealer_id: optStr(b?.dealer_id, 60) || null,
+    dealer_price_usd: b?.dealer_price_usd == null || b?.dealer_price_usd === '' ? null : num(b.dealer_price_usd, 'Dealer price', 0.01, 1e8),
+    dealer_sku: optStr(b?.dealer_sku, 120), dealer_url: optStr(b?.dealer_url, 500),
   };
+}
+
+/** A sourced specimen's value follows the dealer's price while it is not reserved or sealed. */
+function sourceValue(d: ReturnType<typeof readSpecimen>) {
+  if (d.dealer_id && !get('SELECT 1 FROM dealers WHERE id = ?', d.dealer_id)) fail(400, 'Unknown dealer');
+  if (d.dealer_id && d.dealer_price_usd == null) fail(400, 'Set the dealer price');
+  return d.dealer_id ? d.dealer_price_usd : d.vault_value_usd;
 }
 
 export function createSpecimen(actor: string, b: any) {
   const d = readSpecimen(b);
   return tx(() => {
     const id = nextSpecimenId();
-    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: d.vault_value_usd, vault_id: d.vault_id });
-    run(`INSERT INTO specimens (id, name, class, category, mass_g, origin, fall, vault_value_usd, state, vault_id, file, notes, render_seed, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, d.name, d.class, d.category, d.mass_g, d.origin, d.fall, d.vault_value_usd, complete ? 'vault' : 'draft', d.vault_id, JSON.stringify(d.file), d.notes, d.render_seed, now(), now());
+    const value = sourceValue(d);
+    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: value, vault_id: d.vault_id });
+    run(`INSERT INTO specimens (id, name, class, category, mass_g, origin, fall, vault_value_usd, state, vault_id, file, notes, render_seed, dealer_id, dealer_price_usd, dealer_sku, dealer_url, source_status, source_verified_at, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'available', ?, ?, ?)`,
+      id, d.name, d.class, d.category, d.mass_g, d.origin, d.fall, value, complete ? 'vault' : 'draft', d.vault_id, JSON.stringify(d.file), d.notes, d.render_seed,
+      d.dealer_id, d.dealer_price_usd, d.dealer_sku, d.dealer_url, d.dealer_id ? now() : null, now(), now());
     audit(actor, 'specimen.create', id, { name: d.name });
     return toAdmin(specimenRow(id)!);
   });
@@ -118,13 +137,19 @@ export function updateSpecimen(actor: string, id: string, b: any) {
   return tx(() => {
     const s = specimenRow(id) ?? fail(404, 'Specimen not found');
     const valueLocked = ['series', 'locked', 'held', 'redeeming', 'redeemed'].includes(s.state);
-    if (valueLocked && d.vault_value_usd !== s.vault_value_usd) fail(409, `The vault value is fixed while the specimen is ${s.state === 'series' ? 'sealed in a series' : s.state}`);
-    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: d.vault_value_usd, vault_id: d.vault_id });
+    if ((d.dealer_id ?? null) !== (s.dealer_id ?? null) && ['held', 'redeeming', 'redeemed'].includes(s.state)) fail(409, 'The dealer cannot change while the specimen is reserved or redeemed');
+    // A dealer price may change any time (reservations keep their reserved price); a recorded value is fixed once sealed or held.
+    const value = d.dealer_id ? (valueLocked ? s.vault_value_usd : sourceValue(d)) : d.vault_value_usd;
+    if (!d.dealer_id && valueLocked && d.vault_value_usd !== s.vault_value_usd) fail(409, `The value is fixed while the specimen is ${s.state === 'series' ? 'sealed in a series' : s.state}`);
+    const complete = fileComplete({ file: JSON.stringify(d.file), origin: d.origin, vault_value_usd: value, vault_id: d.vault_id });
     let state = s.state;
     if (state === 'draft' && complete) state = 'vault';
     if ((state === 'vault' || state === 'market') && !complete) state = 'draft';
-    run(`UPDATE specimens SET name = ?, class = ?, category = ?, mass_g = ?, origin = ?, fall = ?, vault_value_usd = ?, state = ?, vault_id = ?, file = ?, notes = ?, render_seed = ?, updated_at = ? WHERE id = ?`,
-      d.name, d.class, d.category, d.mass_g, d.origin, d.fall, d.vault_value_usd, state, d.vault_id, JSON.stringify(d.file), d.notes, d.render_seed, now(), id);
+    const priceChanged = d.dealer_id && d.dealer_price_usd !== s.dealer_price_usd;
+    run(`UPDATE specimens SET name = ?, class = ?, category = ?, mass_g = ?, origin = ?, fall = ?, vault_value_usd = ?, state = ?, vault_id = ?, file = ?, notes = ?, render_seed = ?,
+         dealer_id = ?, dealer_price_usd = ?, dealer_sku = ?, dealer_url = ?, source_verified_at = CASE WHEN ? THEN ? ELSE source_verified_at END, updated_at = ? WHERE id = ?`,
+      d.name, d.class, d.category, d.mass_g, d.origin, d.fall, value, state, d.vault_id, JSON.stringify(d.file), d.notes, d.render_seed,
+      d.dealer_id, d.dealer_id ? d.dealer_price_usd : null, d.dealer_sku, d.dealer_url, priceChanged ? 1 : 0, now(), now(), id);
     audit(actor, 'specimen.update', id, { state });
     return toAdmin(specimenRow(id)!);
   });
@@ -515,20 +540,37 @@ export function dropEvent(actor: string, id: string, b: any) {
 /* ---------- redemptions ---------- */
 
 export function listRedemptions(status: string | null) {
-  return all<any>(`SELECT * FROM redemptions ${status ? 'WHERE status = ?' : ''} ORDER BY created_at DESC`, ...(status ? [status] : [])).map(redemptionOf);
+  return all<any>(`SELECT * FROM redemptions ${status ? 'WHERE status = ?' : ''} ORDER BY created_at DESC`, ...(status ? [status] : [])).map(r => {
+    const sp = specimenRow(r.specimen_id);
+    return { ...redemptionOf(r), dealer_sku: sp?.dealer_sku ?? '', dealer_url: sp?.dealer_url ?? '', dealer_price_usd: sp?.dealer_price_usd ?? null };
+  });
 }
 
 export function updateRedemption(actor: string, id: string, b: any) {
   const status = b?.status as string;
-  if (!['requested', 'packing', 'shipped', 'delivered', 'cancelled'].includes(status)) fail(400, 'Unknown status');
+  if (!['requested', 'ordered', 'packing', 'shipped', 'delivered', 'cancelled'].includes(status)) fail(400, 'Unknown status');
   return tx(() => {
     const r = get<any>('SELECT * FROM redemptions WHERE id = ?', id) ?? fail(404, 'Redemption not found');
     if (r.status === 'cancelled' || r.status === 'delivered') fail(409, 'This redemption is finished');
     const tracking = optStr(b?.tracking ?? r.tracking, 120);
+    const ref = optStr(b?.dealer_order_ref ?? r.dealer_order_ref, 120);
     if (status === 'shipped' && !tracking) fail(400, 'Add the tracking number');
-    run('UPDATE redemptions SET status = ?, tracking = ?, updated_at = ? WHERE id = ?', status, tracking, now(), id);
-    if (status === 'shipped' || status === 'delivered') run("UPDATE specimens SET state = 'redeemed', updated_at = ? WHERE id = ?", now(), r.specimen_id);
-    if (status === 'cancelled') {
+    if (status === 'ordered' && !ref) fail(400, 'Add the dealer order number');
+    run('UPDATE redemptions SET status = ?, tracking = ?, dealer_order_ref = ?, updated_at = ? WHERE id = ?', status, tracking, ref, now(), id);
+    if (status === 'shipped' || status === 'delivered') {
+      run("UPDATE specimens SET state = 'redeemed', updated_at = ? WHERE id = ?", now(), r.specimen_id);
+      if (r.reservation_id) run("UPDATE reservations SET status = 'redeemed', updated_at = ?, closed_at = coalesce(closed_at, ?) WHERE id = ?", now(), now(), r.reservation_id);
+    }
+    if (status === 'cancelled' && r.kind === 'dealer') {
+      // The escrow was already released after the burn: refund everything from the ops wallet.
+      const res = get<any>('SELECT * FROM reservations WHERE id = ?', r.reservation_id);
+      const total = cents((res?.paid_usd ?? 0) + (r.price_delta_usd > 0 ? r.price_delta_usd : 0) + r.fee_usd);
+      const p = chain.payout({ to: r.wallet, usd: total, memo: 'dealer order cancelled' });
+      if (res) run("UPDATE reservations SET status = 'refunded', updated_at = ?, closed_at = ? WHERE id = ?", now(), now(), res.id);
+      const sp = specimenRow(r.specimen_id)!;
+      run("UPDATE specimens SET state = CASE WHEN source_status = 'available' THEN 'market' ELSE 'vault' END, owner = NULL, acquired_via = NULL, acquired_at = NULL, paid_usd = NULL, updated_at = ? WHERE id = ?", now(), sp.id);
+      ledger('redemption_refund', { wallet: r.wallet, specimen_id: sp.id, usd: -total, currency: 'USDC', amount: -total, tx: p.tx, split: { reason: 'dealer order cancelled' } });
+    } else if (status === 'cancelled') {
       // Re-mint to the collector and refund the fee.
       const sp = specimenRow(r.specimen_id)!;
       run("UPDATE specimens SET state = 'held', updated_at = ? WHERE id = ?", now(), sp.id);
@@ -597,7 +639,20 @@ export function updateRules(actor: string, b: any): Rules {
     sample_notice: typeof b?.sample_notice === 'boolean' ? b.sample_notice : cur.sample_notice,
     market_funds_buyback: typeof b?.market_funds_buyback === 'boolean' ? b.market_funds_buyback : cur.market_funds_buyback,
     google_client_id: typeof b?.google_client_id === 'string' ? b.google_client_id.trim().slice(0, 200) : cur.google_client_id,
+    source_max_age_hours: b?.source_max_age_hours == null ? cur.source_max_age_hours : Math.round(num(b.source_max_age_hours, 'Source price age', 0, 24 * 90)),
+    token_enabled: typeof b?.token_enabled === 'boolean' ? b.token_enabled : cur.token_enabled,
+    token_symbol: typeof b?.token_symbol === 'string' ? (b.token_symbol.trim().replace(/^\$/, '').toUpperCase().slice(0, 10) || 'ROCKS') : cur.token_symbol,
+    token_mint: typeof b?.token_mint === 'string' ? b.token_mint.trim().slice(0, 60) : cur.token_mint,
+    token_decimals: b?.token_decimals == null ? cur.token_decimals : Math.round(num(b.token_decimals, 'Token decimals', 0, 12)),
+    token_discount: share(b?.token_discount, 'Token discount', cur.token_discount),
+    token_burn_share: share(b?.token_burn_share, 'Burn share', cur.token_burn_share),
+    token_price_source: b?.token_price_source === 'jupiter' ? 'jupiter' : b?.token_price_source === 'manual' ? 'manual' : cur.token_price_source,
+    token_manual_price_usd: b?.token_manual_price_usd == null || b?.token_manual_price_usd === '' ? cur.token_manual_price_usd : num(b.token_manual_price_usd, 'Token price', 0, 1e9),
   };
+  if (r.token_mint && !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(r.token_mint)) fail(400, 'The token mint must be a Solana address');
+  if (r.token_enabled && r.token_price_source === 'jupiter' && !r.token_mint) fail(400, 'Set the token mint to read its price from Jupiter');
+  if (r.token_enabled && r.token_price_source === 'manual' && !(r.token_manual_price_usd > 0)) fail(400, 'Set a token price, or switch the price source to Jupiter');
+  if (r.token_discount >= 0.5) fail(400, 'The token discount must stay below 50%');
   if (r.google_client_id && !/^[\w.-]+\.apps\.googleusercontent\.com$/.test(r.google_client_id)) fail(400, 'The Google client ID looks like 1234-abc.apps.googleusercontent.com');
   if (r.buyback_share >= 1) fail(400, 'The buyback share must stay below 100% of vault value');
   const edge = r.edge_split.rocks_buyback + r.edge_split.launch_reserve + r.edge_split.ops;

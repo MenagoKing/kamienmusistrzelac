@@ -38,9 +38,12 @@ export function drawPickSync(serverSeed: string, scope: string, nonce: number, c
 
 export class HttpError extends Error {
   status: number;
-  constructor(status: number, message: string) {
+  /** Extra fields sent with the error (e.g. code: 'price_changed' and the fresh price). */
+  extra?: Record<string, unknown>;
+  constructor(status: number, message: string, extra?: Record<string, unknown>) {
     super(message);
     this.status = status;
+    this.extra = extra;
   }
 }
 

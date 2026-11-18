@@ -13,6 +13,8 @@ import { ensureSeeded, reseed } from './seed.ts';
 import { activityOf, changePassword, linkWallet, login, profileOf, register, unlinkWallet, updateProfile } from './accounts.ts';
 import { adminListings, buyListing, cancelListing, listForSale, listingsOf } from './market.ts';
 import { publicListings } from './store.ts';
+import * as SRC from './sources.ts';
+import { startTokenSampler, tokenStatus } from './token.ts';
 import { chainAirdrop, chainStatus, drain, migrateSimulatedMints, nftOwnerOf, queueTransfer, retryFailed, startWorker } from './nft.ts';
 import { googleLogin } from './google.ts';
 import { nftJson, nftSvg, saveShareImage, sharePage } from './nftmeta.ts';
@@ -20,6 +22,7 @@ import { nftJson, nftSvg, saveShareImage, sharePage } from './nftmeta.ts';
 ensureSeeded();
 migrateSimulatedMints();
 startWorker();
+startTokenSampler();
 
 type Ctx = { req: IncomingMessage; res: ServerResponse; params: string[]; query: URLSearchParams; body: any };
 type Handler = (c: Ctx) => unknown;
@@ -62,7 +65,22 @@ on('GET', '/api/me', ({ req }) => {
     activity: activityOf(address),
   };
 });
-on('POST', '/api/market/:id/buy', ({ req, params, body }) => buyMarket(requireWallet(req), params[0], body?.currency));
+// Dealer-sourced specimens are reserved (Addendum 1); own stock is bought outright.
+on('POST', '/api/market/:id/buy', ({ req, params, body }) => {
+  const wallet = requireWallet(req);
+  const s = specimenRow(params[0]) ?? fail(404, 'Specimen not found');
+  return s.dealer_id ? SRC.reserve(wallet, s.id, body) : buyMarket(wallet, s.id, body?.currency, body?.expected_price_usd);
+});
+on('GET', '/api/token', () => tokenStatus());
+
+/* ---------- reservations (Addendum 1) ---------- */
+
+on('POST', '/api/reservations/:id/cancel', ({ req, params }) => SRC.cancelReservation(requireWallet(req), params[0]));
+on('POST', '/api/reservations/:id/refund', ({ req, params }) => SRC.refundReservation(requireWallet(req), params[0]));
+on('GET', '/api/reservations/:id/replacements', ({ req, params }) => SRC.replacementOptions(requireWallet(req), params[0]).map(id => toPublic(specimenRow(id)!)));
+on('POST', '/api/reservations/:id/replace', ({ req, params, body }) => SRC.replaceReservation(requireWallet(req), params[0], String(body?.specimen_id ?? '')));
+on('POST', '/api/reservations/:id/redeem-quote', ({ req, params, body }) => SRC.redeemQuote(requireWallet(req), params[0], body?.country));
+on('POST', '/api/reservations/:id/redeem', ({ req, params, body }) => SRC.redeemReservation(requireWallet(req), params[0], body));
 on('POST', '/api/series/:id/open', ({ req, params, body }) => openPack(requireWallet(req), params[0], body?.currency, body?.client_seed));
 on('POST', '/api/specimens/:id/sell-back', ({ req, params }) => sellBack(requireWallet(req), params[0]));
 on('POST', '/api/specimens/:id/redeem', ({ req, params, body }) => redeem(requireWallet(req), params[0], body));
@@ -121,6 +139,16 @@ admin('DELETE', '/specimens/:id', ({ params }, a) => A.deleteSpecimen(a, params[
 admin('POST', '/specimens/:id/list', ({ params }, a) => A.setListing(a, params[0], true));
 admin('POST', '/specimens/:id/unlist', ({ params }, a) => A.setListing(a, params[0], false));
 admin('POST', '/specimens/:id/feature', ({ params, body }, a) => A.setFeatured(a, params[0], !!body?.featured));
+admin('POST', '/specimens/:id/sold-at-source', ({ params }, a) => SRC.markSoldAtSource(a, params[0]));
+admin('POST', '/specimens/:id/source-verified', ({ params, body }, a) => SRC.markSourceAvailable(a, params[0], body?.price_usd));
+admin('GET', '/dealers', () => SRC.listDealers());
+admin('POST', '/dealers', ({ body }, a) => SRC.createDealer(a, body));
+admin('PUT', '/dealers/:id', ({ params, body }, a) => SRC.updateDealer(a, params[0], body));
+admin('POST', '/dealers/:id/import', ({ params, body }, a) => SRC.importOffers(a, params[0], body?.csv));
+// Escrow is read-only for the admin: no route moves escrow money.
+admin('GET', '/escrow', () => SRC.escrowOverview());
+admin('GET', '/escrow/:id/events', ({ params }) => SRC.escrowEvents(params[0]));
+admin('GET', '/token', () => tokenStatus());
 
 admin('GET', '/series', () => all<any>('SELECT * FROM series ORDER BY sort, id').map(s => ({ ...toSeries(s), sort: s.sort })));
 admin('POST', '/series', ({ body }, a) => A.createSeries(a, body));
@@ -224,7 +252,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
       // CSRF: state-changing calls must be JSON from our own pages (cookies are SameSite=Strict too).
       if (!String(req.headers['content-type'] ?? '').includes('application/json')) fail(415, 'Send JSON');
     }
-    const body = method === 'GET' ? {} : await readBody(req, url.pathname === '/api/admin/upload' ? 12 * 1024 * 1024 : url.pathname === '/api/share-image' ? 4 * 1024 * 1024 : 256 * 1024);
+    const body = method === 'GET' ? {} : await readBody(req, url.pathname === '/api/admin/upload' || url.pathname.endsWith('/import') ? 12 * 1024 * 1024 : url.pathname === '/api/share-image' ? 4 * 1024 * 1024 : 256 * 1024);
     let matched = false;
     for (const r of routes) {
       const m = r.re.exec(url.pathname);
@@ -237,7 +265,7 @@ export async function handle(req: IncomingMessage, res: ServerResponse): Promise
     }
     fail(matched ? 405 : 404, matched ? 'Method not allowed' : 'Not found');
   } catch (e) {
-    if (e instanceof HttpError) send(res, e.status, { error: e.message });
+    if (e instanceof HttpError) send(res, e.status, { error: e.message, ...(e.extra ?? {}) });
     else { console.error(e); send(res, 500, { error: 'Something went wrong on our side' }); }
   }
   return true;

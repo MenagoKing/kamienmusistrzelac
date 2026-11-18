@@ -174,3 +174,6 @@ a.wbtn{text-decoration:none}
   .mtabs{margin-bottom:-40px}
   .wbtn .wname{display:none}
 }
+.cb.res{background:rgba(14,10,8,.75);color:var(--dust2);border:1px solid rgba(240,138,93,.5)}
+.cb.sas{background:#F2A08A;color:#1A0E08}
+.ccard-v .rar{margin-left:6px}

@@ -85,6 +85,28 @@ CREATE TABLE IF NOT EXISTS nft_jobs (
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS nft_jobs_status ON nft_jobs(status);
+CREATE TABLE IF NOT EXISTS dealers (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, country TEXT NOT NULL, region TEXT NOT NULL DEFAULT 'OTHER',
+  ship_domestic_usd REAL NOT NULL DEFAULT 15, ship_region_usd REAL NOT NULL DEFAULT 28, ship_world_usd REAL NOT NULL DEFAULT 45,
+  insurance_pct REAL NOT NULL DEFAULT 0.015, contact TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '',
+  api_kind TEXT NOT NULL DEFAULT 'manual', active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS reservations (
+  id TEXT PRIMARY KEY, specimen_id TEXT NOT NULL, holder TEXT NOT NULL, status TEXT NOT NULL,
+  reserved_price_usd REAL NOT NULL, commission_usd REAL NOT NULL, paid_usd REAL NOT NULL, currency TEXT NOT NULL,
+  token_amount REAL, replaced_by TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS reservations_specimen ON reservations(specimen_id);
+CREATE INDEX IF NOT EXISTS reservations_holder ON reservations(holder);
+CREATE TABLE IF NOT EXISTS escrows (
+  id TEXT PRIMARY KEY, reservation_id TEXT NOT NULL, specimen_id TEXT NOT NULL, holder TEXT NOT NULL,
+  amount_usd REAL NOT NULL, status TEXT NOT NULL, created_at TEXT NOT NULL, closed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS escrows_status ON escrows(status);
+CREATE TABLE IF NOT EXISTS escrow_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, escrow_id TEXT NOT NULL, kind TEXT NOT NULL, amount_usd REAL NOT NULL,
+  to_party TEXT NOT NULL, tx TEXT, note TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS audit (
   id INTEGER PRIMARY KEY AUTOINCREMENT, actor TEXT NOT NULL, action TEXT NOT NULL, target TEXT NOT NULL DEFAULT '',
   detail TEXT NOT NULL DEFAULT '{}', created_at TEXT NOT NULL
@@ -116,6 +138,20 @@ addColumn('specimens', 'mint_tx', 'TEXT');
 addColumn('specimens', 'nft_owner', 'TEXT');
 addColumn('users', 'google_sub', 'TEXT');
 addColumn('series', 'ends_at', 'TEXT');
+// Addendum 1: specimens sourced from dealers, reservations instead of vault stock.
+addColumn('specimens', 'dealer_id', 'TEXT');
+addColumn('specimens', 'dealer_price_usd', 'REAL');
+addColumn('specimens', 'dealer_sku', "TEXT NOT NULL DEFAULT ''");
+addColumn('specimens', 'dealer_url', "TEXT NOT NULL DEFAULT ''");
+addColumn('specimens', 'source_status', "TEXT NOT NULL DEFAULT 'available'");
+addColumn('specimens', 'source_verified_at', 'TEXT');
+addColumn('redemptions', 'kind', "TEXT NOT NULL DEFAULT 'vault'");
+addColumn('redemptions', 'reservation_id', 'TEXT');
+addColumn('redemptions', 'dealer_id', 'TEXT');
+addColumn('redemptions', 'dealer_order_ref', "TEXT NOT NULL DEFAULT ''");
+addColumn('redemptions', 'due_at', 'TEXT');
+addColumn('redemptions', 'shipping_usd', 'REAL');
+addColumn('redemptions', 'price_delta_usd', 'REAL');
 
 export const all = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).all(...p) as T[];
 export const get = <T = Row>(sql: string, ...p: any[]) => db.prepare(sql).get(...p) as T | undefined;
